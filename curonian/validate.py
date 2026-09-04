@@ -48,16 +48,20 @@ def skill(model: pd.Series, obs: pd.Series) -> dict:
     err = m - o
     win = model.loc[obs.index.min():obs.index.max()]
     peak_m = float(win.max())
-    # win.idxmax() alone picks an arbitrary member of a near-tie between two peaks of
-    # comparable height; among times within PEAK_TIE_M of the window max, report the
-    # one closest to the observed peak so timing isn't an aliasing artifact.
+    # A plain win.idxmax() picks an arbitrary member of a near-exact tie between two peaks of
+    # comparable height (floating-point aliasing -- see test_skill_on_synthetic_series's history).
+    # Among times within PEAK_TIE_M of the window max, report the *median* time (the plateau
+    # centre) rather than whichever is closest to the observation: the model's reported peak
+    # time must not be a function of the observed peak time, or peak_dt_h could only ever be
+    # pulled toward zero by construction.
     tied = win.index[win >= peak_m - PEAK_TIE_M]
-    t_model = min(tied, key=lambda t: abs(t - o.idxmax()))
+    peak_time = tied[(len(tied) - 1) // 2]     # lower median: for an even count, the earlier of the two middle times
     return {
         "bias": float(err.mean()), "rmse": float(np.sqrt((err ** 2).mean())),
         "r": float(np.corrcoef(m, o)[0, 1]) if len(o) > 2 else np.nan,
         "peak_err_m": peak_m - float(o.max()),
-        "peak_dt_h": float((t_model - o.idxmax()) / pd.Timedelta("1h")),
+        "peak_time": peak_time,
+        "peak_dt_h": float((peak_time - o.idxmax()) / pd.Timedelta("1h")),
         "n": int(ok.sum()),
     }
 
@@ -96,6 +100,8 @@ def flood_map(run_dir: Path = common.RUN_XAVER, out_png: Path | None = None,
             zb = np.ma.filled(d["zb"][:], np.nan)
         depth = (zsmax - zb)[np.ix_(sel_y, sel_x)]; gx, gy = x[sel_x], y[sel_y]
         ground = zb[np.ix_(sel_y, sel_x)]; cell_km2 = 0.01
+        if len(gy) > 1 and gy[0] < gy[-1]:  # y ascending with row index (south-up storage): normalise to north-up
+            depth = depth[::-1, :]; ground = ground[::-1, :]; gy = gy[::-1]
     flooded = np.isfinite(depth) & (depth > 0.05) & (ground > 0.0)      # land only
     area_km2 = float(flooded.sum() * cell_km2)
     if out_png:
