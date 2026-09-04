@@ -10,9 +10,9 @@ import common
 from prep.make_bathymetry import lagoon_polygon
 
 STATIONS_LONLAT = {
-    "Klaipeda": (21.09, 55.715), "Juodkrante": (21.11, 55.55), "Nida": (21.005, 55.303),
-    "Vente": (21.19, 55.34), "Uostadvaris": (21.24, 55.33), "Rusne": (21.37, 55.30),
-    "Silute": (21.48, 55.35), "Atmata_mouth": (21.23, 55.335), "Zalivino_RU": (21.05, 54.98),
+    "Klaipeda": (21.09, 55.715), "Juodkrante": (21.1003, 55.5500), "Nida": (21.0066, 55.3015),
+    "Vente": (21.19, 55.34), "Uostadvaris": (21.24, 55.33), "Rusne": (21.3710, 55.2955),
+    "Silute": (21.4816, 55.3392), "Atmata_mouth": (21.23, 55.335), "Zalivino_RU": (21.05, 54.98),
 }
 DELTA_BOX = (325_000, 6_100_000, 370_000, 6_150_000)   # Šilutė / Rusnė / Russian lowlands
 

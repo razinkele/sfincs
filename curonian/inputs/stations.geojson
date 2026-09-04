@@ -4,12 +4,12 @@
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::3346" } },
 "features": [
 { "type": "Feature", "properties": { "name": "Klaipeda" }, "geometry": { "type": "Point", "coordinates": [ 317168.465127572009806, 6179433.511892329901457 ] } },
-{ "type": "Feature", "properties": { "name": "Juodkrante" }, "geometry": { "type": "Point", "coordinates": [ 317659.658801598183345, 6161022.782999427989125 ] } },
-{ "type": "Feature", "properties": { "name": "Nida" }, "geometry": { "type": "Point", "coordinates": [ 309853.120414215489291, 6133823.520731952041388 ] } },
+{ "type": "Feature", "properties": { "name": "Juodkrante" }, "geometry": { "type": "Point", "coordinates": [ 317047.839279809617437, 6161048.295395233668387 ] } },
+{ "type": "Feature", "properties": { "name": "Nida" }, "geometry": { "type": "Point", "coordinates": [ 309947.494154820102267, 6133652.273599456995726 ] } },
 { "type": "Feature", "properties": { "name": "Vente" }, "geometry": { "type": "Point", "coordinates": [ 321761.158719613216817, 6137450.67347963526845 ] } },
 { "type": "Feature", "properties": { "name": "Uostadvaris" }, "geometry": { "type": "Point", "coordinates": [ 324887.677568567043636, 6136211.187707057222724 ] } },
-{ "type": "Feature", "properties": { "name": "Rusne" }, "geometry": { "type": "Point", "coordinates": [ 333007.546727467910387, 6132553.985154571942985 ] } },
-{ "type": "Feature", "properties": { "name": "Silute" }, "geometry": { "type": "Point", "coordinates": [ 340191.767641646438278, 6137859.266171667724848 ] } },
+{ "type": "Feature", "properties": { "name": "Rusne" }, "geometry": { "type": "Point", "coordinates": [ 333052.12536136538256, 6132050.893383606337011 ] } },
+{ "type": "Feature", "properties": { "name": "Silute" }, "geometry": { "type": "Point", "coordinates": [ 340249.732573872432113, 6136653.882572749629617 ] } },
 { "type": "Feature", "properties": { "name": "Atmata_mouth" }, "geometry": { "type": "Point", "coordinates": [ 324275.52429414074868, 6136792.689549126662314 ] } },
 { "type": "Feature", "properties": { "name": "Zalivino_RU" }, "geometry": { "type": "Point", "coordinates": [ 311189.655592917348258, 6097766.954334826208651 ] } }
 ]
