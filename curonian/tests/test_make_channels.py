@@ -1,4 +1,5 @@
 import pytest
+import requests
 from shapely.geometry import LineString
 
 import common
@@ -26,8 +27,16 @@ def test_build_channels_prefers_osm_geometry():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_osm_rivers_returns_both_distributaries():
-    osm = mc.fetch_osm_rivers()
+    try:
+        osm = mc.fetch_osm_rivers()
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code >= 500:
+            pytest.skip(f"Overpass unavailable: {exc}")
+        raise
+    except (requests.Timeout, requests.ConnectionError) as exc:
+        pytest.skip(f"Overpass unavailable: {exc}")
     assert set(osm) == {"atmata", "skirvyte"}
     for line in osm.values():
         assert line.geom_type == "LineString" and len(line.coords) > 5

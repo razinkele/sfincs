@@ -8,6 +8,7 @@ import common
 from prep import make_bathymetry as mb
 
 
+@pytest.mark.integration
 def test_lagoon_polygon_is_the_big_one():
     poly = mb.lagoon_polygon()
     assert 1500e6 < poly.area < 1700e6  # 1601 km2 in the database

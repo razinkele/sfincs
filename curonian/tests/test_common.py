@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 import common
 
 
@@ -26,6 +27,7 @@ def test_lonlat_to_xy_klaipeda_mouth_is_inside_domain():
     assert 315_000 < x < 322_000 and 6_177_000 < y < 6_183_000
 
 
+@pytest.mark.integration
 def test_read_table_reads_gauge_rows():
     df = common.read_table(
         "SELECT date, site, wlevel_06 FROM physical_daily WHERE site=? AND date='2013-12-06'", ("Uostadvaris",)
@@ -33,6 +35,7 @@ def test_read_table_reads_gauge_rows():
     assert len(df) == 1 and df.loc[0, "wlevel_06"] == 592
 
 
+@pytest.mark.integration
 def test_raw_inputs_exist():
     for p in (common.DEM_5M, common.EMODNET, common.ISOBATHS, common.DB, common.ERA5_2013, common.SFINCS_BIN):
         assert p.exists(), p

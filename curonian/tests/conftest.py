@@ -10,3 +10,4 @@ import pytest
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "integration: uses real data on this machine or the network")
+    config.addinivalue_line("markers", "network: requires a live network call (e.g. Overpass, CDS)")
