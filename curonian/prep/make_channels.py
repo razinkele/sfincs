@@ -15,6 +15,7 @@ from shapely.ops import linemerge, transform, unary_union
 import common
 
 OVERPASS = "https://overpass-api.de/api/interpreter"
+HEADERS = {"User-Agent": "curonian-sfincs/0.1 (SFINCS model prep; https://github.com/razinkele)"}
 QUERY = ('[out:json][timeout:60];'
          '(way["waterway"="river"]["name"~"^Atmata$|Skirvyt"](55.20,21.05,55.80,21.50););'
          'out geom;')
@@ -44,7 +45,7 @@ def _merge(lines: list[LineString]) -> LineString:
 
 
 def fetch_osm_rivers(timeout: int = 90) -> dict[str, LineString]:
-    r = requests.post(OVERPASS, data={"data": QUERY}, timeout=timeout)
+    r = requests.post(OVERPASS, data={"data": QUERY}, headers=HEADERS, timeout=timeout)
     r.raise_for_status()
     groups: dict[str, list[LineString]] = {"atmata": [], "skirvyte": []}
     for el in r.json().get("elements", []):
