@@ -14,7 +14,7 @@ dem_5m:
     LowerNEMUNASdem_5m: elevtn
   meta:
     category: topography
-    notes: 5 m DEM of the lower Nemunas; flat 0 inside the lagoon, absent on the Spit
+    notes: 5 m DEM of the lower Nemunas; flat 0 inside the lagoon, absent on the Spit. Hydromt logs a "CRS does not match" warning because the file's WKT is non-canonical LKS-94; this is benign.
 
 lagoon_bathy_50m:
   data_type: RasterDataset

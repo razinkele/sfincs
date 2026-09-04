@@ -17,9 +17,8 @@ def test_catalog_sources_load():
     for name in ("dem_5m", "lagoon_bathy_50m", "emodnet_2022", "lagoon_boundary", "channels", "active_region", "boundary_ring"):
         assert name in dc.sources, name
     dem = dc.get_rasterdataset("dem_5m", geom=_geom(330_000, 6_115_000, 332_000, 6_117_000), buffer=0)
-    # CRS is 3346 (Lithuania TM). Verify via coordinates in expected range, not to_epsg() (hydromt 0.10 limitation)
-    crs_epsg = dem.raster.crs.to_epsg()
-    assert (crs_epsg == common.CRS or crs_epsg is None) and dem.name == "elevtn"
+    # DEM's WKT is non-canonical LKS-94; to_epsg(min_confidence=20) identifies EPSG:3346
+    assert dem.raster.crs.to_epsg(min_confidence=20) == common.CRS and dem.name == "elevtn"
     assert abs(dem.raster.res[0]) == 5.0 and float(dem.max()) < 20
     bathy = dc.get_rasterdataset("lagoon_bathy_50m", geom=_geom(315_000, 6_125_000, 320_000, 6_130_000), buffer=0)
     assert float(bathy.min()) < -1.0
