@@ -3,8 +3,8 @@
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 13 | -0.01 | 0.08 | 0.91 | +0.13 | +10 |
-| Nida | 26 | -0.01 | 0.10 | 0.74 | -0.07 | +46 |
-| Vente | 26 | +0.05 | 0.12 | 0.70 | +0.19 | -59 |
+| Nida | 26 | -0.01 | 0.10 | 0.74 | -0.07 | -67 |
+| Vente | 26 | +0.05 | 0.12 | 0.70 | +0.19 | -60 |
 | Uostadvaris | 13 | -0.06 | 0.10 | 0.85 | +0.08 | +0 |
 
 Flooded land in the delta window (depth > 5 cm, ground > 0 m): **163.2 km²**

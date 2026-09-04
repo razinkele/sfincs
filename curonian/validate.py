@@ -38,7 +38,7 @@ def load_his(run_dir: Path = common.RUN_XAVER) -> pd.DataFrame:
     return pd.DataFrame(zs, index=t, columns=names)
 
 
-PEAK_TIE_M = 0.01   # peaks within 1 cm of the window max are the same peak for timing purposes
+PEAK_TIE_M = 0.001  # peaks within 1 mm of the window max are numerically the same peak (floating-point aliasing)
 
 
 def skill(model: pd.Series, obs: pd.Series) -> dict:
