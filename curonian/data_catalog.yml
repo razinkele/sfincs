@@ -1,0 +1,66 @@
+# HydroMT 0.10 data catalogue for the Curonian Lagoon SFINCS model.
+# Paths are absolute on this machine; raw sources are read-only.
+meta:
+  root: /home/razinka/SFINCS/curonian
+  version: 2026-09-04
+
+dem_5m:
+  data_type: RasterDataset
+  driver: raster
+  path: /home/razinka/telemac/data/LowerNEMUNASdem_5m.tif
+  crs: 3346
+  nodata: -9999
+  rename:
+    LowerNEMUNASdem_5m: elevtn
+  meta:
+    category: topography
+    notes: 5 m DEM of the lower Nemunas; flat 0 inside the lagoon, absent on the Spit
+
+lagoon_bathy_50m:
+  data_type: RasterDataset
+  driver: raster
+  path: inputs/lagoon_bathy_50m.tif
+  crs: 3346
+  nodata: -9999
+  rename:
+    lagoon_bathy_50m: elevtn
+  meta:
+    category: bathymetry
+    notes: interpolated from ~/curonian/isobates.gpkg by prep/make_bathymetry.py
+
+emodnet_2022:
+  data_type: RasterDataset
+  driver: netcdf
+  path: /home/razinka/telemac/Curonian/data/curonian_bathymetry_hires.nc
+  crs: 4326
+  rename:
+    elevation: elevtn
+  meta:
+    category: bathymetry
+    notes: EMODnet 2022 subset; fallback only (Spit land, Baltic outside the strait)
+
+lagoon_boundary:
+  data_type: GeoDataFrame
+  driver: vector
+  path: /home/razinka/curonian/curonian_db.gpkg
+  driver_kwargs:
+    layer: lagoon_boundary
+  crs: 3346
+
+channels:
+  data_type: GeoDataFrame
+  driver: vector
+  path: inputs/channels.geojson
+  crs: 3346
+
+active_region:
+  data_type: GeoDataFrame
+  driver: vector
+  path: inputs/active_region.geojson
+  crs: 3346
+
+boundary_ring:
+  data_type: GeoDataFrame
+  driver: vector
+  path: inputs/boundary_ring.geojson
+  crs: 3346
