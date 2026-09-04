@@ -12,3 +12,8 @@ dependencies:
   - ipykernel
   - matplotlib
   - netcdf4
+  - pytest
+  - requests
+  - pip
+  - pip:
+      - cdsapi>=0.7.5
