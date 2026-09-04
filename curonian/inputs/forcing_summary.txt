@@ -1,0 +1,6 @@
+GTSM offset applied: +0.092 m (calm window 2013-11-28..2013-12-04)
+boundary level: start 0.39 m, storm peak 1.00 m at 2013-12-07 07:00:00
+Klaipeda 06h obs peak: 0.88 m at 2013-12-06 06:00:00
+wind peak: 19.5 m/s at 2013-12-06 06:00:00 from 236 deg
+Nemunas Q: 351..653 m3/s; Minija constant 46.0 m3/s
+FINDING: GTSM storm peak (2013-12-07 07:00:00) is 1 days 01:00:00 from the Klaipeda 06:00 gauge peak (2013-12-06 06:00:00) -- more than the 12 h check tolerance. Not a blocker: recorded per spec.
