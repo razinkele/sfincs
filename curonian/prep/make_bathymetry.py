@@ -69,7 +69,11 @@ def make_bathymetry(res: float = 50.0, out: Path = common.INPUTS / "lagoon_bathy
     holes = np.isnan(z)
     if holes.any():
         z[holes] = NearestNDInterpolator(xy, depth)(gx[holes], gy[holes])
-    elev = -np.clip(z, 0.0, 20.0)
+    # isobath_points() already dropped depths > 10 m (see its comment); clip here to the
+    # same 10 m so the interpolator's overshoot at the edge of that filtered set can't
+    # push a cell past what the retained isobaths actually support. The tif's minimum
+    # elevation is therefore -10.0 m.
+    elev = -np.clip(z, 0.0, 10.0)
 
     da = xr.DataArray(elev.astype("float32"), dims=("y", "x"), coords={"y": yc, "x": xc}, name="elevtn")
     da.raster.set_crs(common.CRS)
@@ -77,7 +81,7 @@ def make_bathymetry(res: float = 50.0, out: Path = common.INPUTS / "lagoon_bathy
     inside = da.raster.geometry_mask(gpd.GeoDataFrame(geometry=[lagoon], crs=common.CRS))
     da = da.where(inside)
     assert float(da.count()) > 0.9 * lagoon.area / res**2, "lagoon coverage below 90 %"
-    assert float(da.min()) >= -20.0 and float(da.max()) <= 0.0
+    assert float(da.min()) >= -10.0 and float(da.max()) <= 0.0
 
     out.parent.mkdir(parents=True, exist_ok=True)
     da.raster.to_raster(out, driver="GTiff", nodata=NODATA, compress="lzw")

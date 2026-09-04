@@ -6,6 +6,7 @@ Everything the spec fixes as a project-wide value lives here so that a change
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import numpy as np
@@ -57,5 +58,5 @@ def lonlat_to_xy(lon: float, lat: float) -> tuple[float, float]:
 def read_table(sql: str, params: tuple = ()) -> pd.DataFrame:
     """Run a read-only SQL query against the attribute tables of curonian_db.gpkg."""
     uri = f"file:{DB}?mode=ro"
-    with sqlite3.connect(uri, uri=True) as con:
+    with closing(sqlite3.connect(uri, uri=True)) as con:
         return pd.read_sql_query(sql, con, params=params)

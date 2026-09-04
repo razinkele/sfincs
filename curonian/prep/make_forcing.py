@@ -102,8 +102,12 @@ def main(inputs: Path = common.INPUTS, use_cmems: bool = False) -> None:
         print("using the daily CMEMS cache as sea boundary (fallback)")
     else:
         gtsm = pd.read_csv(inputs / "gtsm_klaipeda.csv", index_col=0, parse_dates=True)["waterlevel_m"]
+    # Spec section 5 checks the boundary against the Klaipeda 06:00 series only; restrict
+    # here even though load_gauge_levels("Klaipeda") currently returns only 06:00 readings
+    # anyway (no wlevel_18 rows exist for this site).
     klaipeda = load_gauge_levels("Klaipeda")
-    corrected, offset = bias_correct(gtsm, klaipeda, common.CALM_WINDOW)
+    klaipeda_06 = klaipeda.loc[klaipeda.index.hour == 6]
+    corrected, offset = bias_correct(gtsm, klaipeda_06, common.CALM_WINDOW)
     bnd_pts = gpd.read_file(inputs / "boundary_points.geojson")
     bzs = boundary_forcing(corrected, len(bnd_pts))
     bzs.to_csv(inputs / "bzs.csv", index_label="time")
@@ -118,13 +122,13 @@ def main(inputs: Path = common.INPUTS, use_cmems: bool = False) -> None:
     storm = corrected.loc["2013-12-05":"2013-12-08"]
     summary = (f"GTSM offset applied: {offset:+.3f} m (calm window {common.CALM_WINDOW[0].date()}..{common.CALM_WINDOW[1].date()})\n"
                f"boundary level: start {corrected.loc[common.TREF]:.2f} m, storm peak {storm.max():.2f} m at {storm.idxmax()}\n"
-               f"Klaipeda 06h obs peak: {klaipeda.max():.2f} m at {klaipeda.idxmax()}\n"
+               f"Klaipeda 06h obs peak: {klaipeda_06.max():.2f} m at {klaipeda_06.idxmax()}\n"
                f"wind peak: {wind['mag'].max():.1f} m/s at {wind['mag'].idxmax()} from {wind.loc[wind['mag'].idxmax(), 'dir']:.0f} deg\n"
                f"Nemunas Q: {dis[1].min():.0f}..{dis[1].max():.0f} m3/s; Minija constant {common.MINIJA_Q_DEC} m3/s\n")
-    gap = abs(storm.idxmax() - klaipeda.idxmax())
+    gap = abs(storm.idxmax() - klaipeda_06.idxmax())
     if gap > pd.Timedelta("12h"):
         summary += (f"FINDING: GTSM storm peak ({storm.idxmax()}) is {gap} from the Klaipeda 06:00 gauge peak "
-                    f"({klaipeda.idxmax()}) -- more than the 12 h check tolerance. Not a blocker: recorded per spec.\n")
+                    f"({klaipeda_06.idxmax()}) -- more than the 12 h check tolerance. Not a blocker: recorded per spec.\n")
     (inputs / "forcing_summary.txt").write_text(summary)
     print(summary)
 

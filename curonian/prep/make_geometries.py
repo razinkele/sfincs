@@ -9,6 +9,8 @@ from shapely.ops import unary_union
 import common
 from prep.make_bathymetry import lagoon_polygon
 
+# Juodkrante, Nida, Rusne and Silute are offset 0.2-1.2 km from the gauge positions
+# in the spec so that they sit on wet model cells (see README Run log).
 STATIONS_LONLAT = {
     "Klaipeda": (21.09, 55.715), "Juodkrante": (21.1003, 55.5500), "Nida": (21.0066, 55.3015),
     "Vente": (21.19, 55.34), "Uostadvaris": (21.24, 55.33), "Rusne": (21.3710, 55.2955),

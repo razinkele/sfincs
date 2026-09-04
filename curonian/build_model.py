@@ -11,12 +11,19 @@ from scipy import ndimage
 
 import common
 
+# Order is deliberate, not the spec's DEM-first prose: the DEM is a flat 0 inside the
+# lagoon, and setup_dep's merge_method="first" keeps the first valid value at each
+# cell, so the lagoon bathymetry (masked to the lagoon) must come first or it would
+# never be used. Do not reorder to match section 3's listing.
 DATASETS_DEP = [
     {"elevtn": "lagoon_bathy_50m", "mask": "lagoon_boundary", "reproj_method": "bilinear"},
     {"elevtn": "dem_5m", "reproj_method": "bilinear"},
     {"elevtn": "emodnet_2022", "reproj_method": "bilinear"},
 ]
-DATASETS_RIV = [{"centerlines": "channels", "rivwth": 200, "rivbed": -4.0, "segment_length": 250}]
+# rivwth/rivbed here are fallbacks only, used where the channels.geojson attributes
+# are missing; build_channels() already sets per-channel rivwth/rivbed and those
+# GeoJSON attributes win over these defaults.
+DATASETS_RIV = [{"centerlines": "channels", "rivwth": 200, "rivbed": -4.0}]
 
 
 def _read_ts(path: Path) -> pd.DataFrame:
@@ -63,7 +70,12 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True):
     sf.setup_wind_forcing(timeseries=str(inputs / "wind.csv"))
     sf.setup_observation_points(locations=gpd.read_file(inputs / "stations.geojson"))
     sf.write()
-    print(check_model(run_dir))
+    r = check_model(run_dir)
+    print(r)
+    assert 200_000 <= r["n_active"] <= 400_000, f"n_active out of [200000, 400000]: {r['n_active']}"
+    assert 20 <= r["n_bnd"] <= 200, f"n_bnd out of [20, 200]: {r['n_bnd']}"
+    assert r["bnd_in_ring"], f"boundary cells outside the boundary ring: {r}"
+    assert r["connected"], f"strait not connected to the open lagoon: {r}"
     return sf
 
 
