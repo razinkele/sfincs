@@ -54,8 +54,19 @@ Merge: DEM first, isobath grid inside the lagoon polygon, EMODnet as fallback,
 | Skirvytė | centreline from the apex to the lagoon | 150 m | −3 m |
 
 Widths and depths are first estimates; where the isobaths or DEM already carry the
-channel, the deeper of the two wins. Centrelines are stored as GeoJSON in the
-project folder and are part of the reviewed inputs.
+channel, the deeper of the two wins.
+
+Centreline source: `prep/make_channels.py` queries OSM Overpass for
+`waterway=river` ways named Atmata and Skirvytė, and for the strait uses the OSM
+fairway of the Klaipėda harbour channel if present, otherwise a fixed list of
+coordinates from the lagoon exit (55.62 N, 21.15 E) through the strait (55.68 N,
+21.12 E) to the boundary arc (55.73 N, 21.09 E). Fallback for the distributaries
+if Overpass is unreachable: fixed coordinate lists from the apex near Rusnė
+(55.30 N, 21.37 E) to the Atmata mouth (55.34 N, 21.25 E) and to the Skirvytė
+mouth (55.27 N, 21.28 E). The result is written to `inputs/channels.geojson`
+(EPSG:3346, fields `name`, `rivwth`, `rivdph`) and is part of the reviewed inputs.
+The local `~/telemac/Curonian/data/curonian_osm.json` is an empty error response
+and is not used.
 
 ## 5. Vertical datum
 
