@@ -1,0 +1,30 @@
+x0              = 0.0
+y0              = 0.0
+mmax            = 50
+nmax            = 20
+dx              = 100.0
+dy              = 100.0
+rotation        = 0
+
+tref            = 20240101 000000
+tstart          = 20240101 000000
+tstop           = 20240101 060000
+
+inputformat     = asc
+outputformat    = net
+
+depfile         = sfincs.dep
+mskfile         = sfincs.msk
+bndfile         = sfincs.bnd
+bzsfile         = sfincs.bzs
+obsfile         = sfincs.obs
+
+advection       = 1
+alpha           = 0.5
+huthresh        = 0.05
+manning         = 0.04
+zsini           = 0.0
+
+dtout           = 1800
+dthisout        = 300
+dtmaxout        = 21600

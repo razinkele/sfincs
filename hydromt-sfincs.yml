@@ -1,0 +1,14 @@
+# Recreate with:  micromamba create -n hydromt-sfincs -f hydromt-sfincs.yml
+# Then copy sitecustomize.py (see README, "zlib clash") into the env's site-packages.
+name: hydromt-sfincs
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11        # hydromt 0.10 requires <3.12
+  - hydromt_sfincs=1.2.2
+  - pandas<3           # hydromt_sfincs 1.2.2 uses Index.is_integer(), removed in pandas 3
+  - jupyterlab
+  - ipykernel
+  - matplotlib
+  - netcdf4

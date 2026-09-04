@@ -1,0 +1,20 @@
+# large or generated
+SFINCS_2026_01_release.zip
+SFINCS_2026_01_release/
+sfincs-src/
+sfincs-linux/
+logs/
+.remember/
+*.nc
+*.tif
+*.log
+__pycache__/
+# model run outputs
+curonian/runs/*/sfincs_*.nc
+curonian/runs/*/sfincs.log
+curonian/runs/*/sfincs_log.txt
+curonian/inputs/*.nc
+curonian/inputs/*.tif
+test_model*/sfincs_log.txt
+test_model*/sfincs.log
+test_model_hydromt/gis/
