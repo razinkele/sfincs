@@ -96,3 +96,11 @@ which writes `manning_sea = 0.02` for cells below datum instead of the uniform 0
 hydromt_sfincs 2.0.0 (component-based API, `sf.grid.create()` etc.) exists only as a
 release candidate on PyPI as of September 2026; it needs hydromt >= 1.3 and would go in
 a separate env. Docs: https://deltares.github.io/hydromt_sfincs/
+
+## Models built on this SFINCS build
+
+`curonian/` is a whole-lagoon compound-flood model of the Curonian Lagoon
+(Lithuania), first hindcast Storm Xaver (28 Nov–11 Dec 2013), built with the
+`hydromt-sfincs` environment above and run with this folder's Linux `sfincs`
+binary. See `curonian/README.md` for build/run commands and validation
+results.
