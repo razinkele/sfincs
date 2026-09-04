@@ -6,6 +6,8 @@ Overpass. Output: inputs/channels.geojson with rivwth [m] and rivbed [m datum].
 """
 from __future__ import annotations
 
+import sys
+
 import geopandas as gpd
 import requests
 from pyproj import Transformer
@@ -72,13 +74,31 @@ def build_channels(osm: dict[str, LineString] | None) -> gpd.GeoDataFrame:
     return gdf
 
 
-def main(out=common.INPUTS / "channels.geojson") -> gpd.GeoDataFrame:
+def main(out=common.INPUTS / "channels.geojson", allow_fallback: bool = False) -> gpd.GeoDataFrame:
     try:
         osm = fetch_osm_rivers()
         source = "osm"
-    except Exception as exc:  # network down or Overpass busy: use fixed coordinates
-        print(f"Overpass unavailable ({exc}); using fallback coordinates")
+    except Exception as exc:  # network down or Overpass busy
+        # Check if existing file has OSM data
+        if out.exists():
+            try:
+                existing = gpd.read_file(out)
+                if existing["source"].tolist() == ["fixed", "osm", "osm"]:
+                    print(f"Overpass failed ({exc}); keeping existing OSM-derived {out}")
+                    return existing
+            except Exception:
+                pass  # Fall through to handle failure
+
+        # No existing OSM file: handle based on allow_fallback flag
+        if not allow_fallback:
+            msg = f"Overpass failed ({exc}); no fallback without --allow-fallback flag"
+            print(msg, file=sys.stderr)
+            raise SystemExit(2)
+
+        # Write fallback
+        print(f"Overpass failed ({exc}); writing fallback coordinates to {out}")
         osm, source = None, "fallback"
+
     gdf = build_channels(osm)
     gdf["source"] = ["fixed", source, source]
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -88,4 +108,5 @@ def main(out=common.INPUTS / "channels.geojson") -> gpd.GeoDataFrame:
 
 
 if __name__ == "__main__":
-    main()
+    allow_fallback = "--allow-fallback" in sys.argv
+    main(allow_fallback=allow_fallback)
