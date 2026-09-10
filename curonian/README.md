@@ -26,6 +26,10 @@ Tests: `micromamba run -n hydromt-sfincs python -m pytest tests -q`
   in `prep/make_geometries.STATIONS_LONLAT`, then reran `make_geometries`,
   `build_model.py`, and the full simulation. All 9 stations now vary by more than
   0.2 m over the run.
+- Xaver 2013 gridded wind run (28 Nov–11 Dec 2013, `runs/xaver_2013_gridwind`):
+  24.2 min on 16 threads, mean dt 3.46 s.
+- Xaver 2013 gridded wind + pressure run (28 Nov–11 Dec 2013,
+  `runs/xaver_2013_gridwind_pressure`): 25.4 min on 16 threads, mean dt 3.46 s.
 
 ## Results: Xaver 2013
 
@@ -139,6 +143,91 @@ below.
   looks right as it stands — bias is within ±6 cm at all four gauges;
   (4) channel dimensions and the Minija constant discharge — this event
   gives no evidence either way.
+
+## Sensitivity: gridded ERA5 wind and pressure
+
+The baseline run above forces SFINCS with a spatially uniform wind: the ERA5
+10 m wind at a single point (Nida) broadcast across the whole domain. Two
+sensitivity runs replace that with the actual ERA5 field over the lagoon, to
+test the "uniform wind first" item at the top of the baseline's Assumptions
+list above.
+
+### What changed
+
+`prep/fetch_era5_grid.py` fetches the hourly, 0.25° ERA5
+reanalysis-era5-single-levels grid over a box around the lagoon (56.0–54.75°N,
+20.25–22.0°E; 8×6 cells) for 27 Nov–11 Dec 2013 and reshapes it to
+`inputs/era5_grid_xaver.nc` (`wind10_u`, `wind10_v`, `press_msl` on
+`time, y, x`). `build_model.py --wind grid --run-name xaver_2013_gridwind`
+calls `setup_wind_forcing_from_grid` on that file instead of
+`setup_wind_forcing`'s single-point `wind.csv` (`sfincs.inp` gets
+`netamuamvfile` instead of `wndfile`). `build_model.py --wind grid --pressure
+--run-name xaver_2013_gridwind_pressure` additionally calls
+`setup_pressure_forcing_from_grid` on the same file (`netampfile`).
+`pavbnd` stays 0 (hydromt_sfincs' own default, left untouched) and `baro`
+stays 1 (also its default): the GTSM boundary series already has the inverse
+barometer effect baked in from its own reanalysis, so a boundary pressure
+correction here would double count it, while `baro = 1` still lets SFINCS
+apply the pressure gradient force from `netampfile` inside the domain.
+Bathymetry, subgrid, boundary, discharge and river forcing are unchanged from
+`runs/xaver_2013`; both variants pass the same `check_model()` gate
+(`{'n_active': 331933, 'n_bnd': 70, 'connected': True, 'bnd_in_ring': True}`,
+identical to the baseline) and are scored by `validate.py --run <name>` the
+same way as the baseline. `inputs/era5_grid_summary.txt` records the fetch: a
+315-step, 8×6-cell, 0.25° grid for 2013-11-27 23:00–2013-12-11 01:00; Nida-point
+wind speed RMSE 0.000 m/s against the existing point series (well inside the
+0.5 m/s check); peak wind speed 20.6 m/s at 2013-12-06 03:00 (55.50°N,
+20.50°E); mean sea level pressure 100956 Pa; pressure minimum 96740 Pa at
+2013-12-06 08:00.
+
+### Run log
+
+- Xaver 2013 gridded wind run (28 Nov–11 Dec 2013, `runs/xaver_2013_gridwind`):
+  24.2 min on 16 threads, mean dt 3.46 s.
+- Xaver 2013 gridded wind + pressure run (28 Nov–11 Dec 2013,
+  `runs/xaver_2013_gridwind_pressure`): 25.4 min on 16 threads, mean dt 3.46 s.
+
+### Comparison
+
+Numbers below are pasted verbatim from `results/xaver_2013/validation.md`,
+`results/xaver_2013_gridwind/validation.md` and
+`results/xaver_2013_gridwind_pressure/validation.md` (peak err/dt for
+Uostadvaris and Vente are the storm-window figures; Uostadvaris peak err/dt
+are the C1 line's, which carries one more decimal than the table).
+
+| run | Vente storm peak err m | Uostadvaris peak err m | Uostadvaris peak dt h | Nida C2 err m (verdict) | Uostadvaris 8 Dec 06:00 err m | Nida 8 Dec 06:00 err m | Klaipeda storm RMSE m | flooded area km² | C1 | C2 | C3 | C4 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| baseline (uniform wind) | +0.19 | +0.08 | +0.3 | -0.13 (met, marginal) | -0.24 | -0.22 | 0.12 | 165.5 | met | met (marginal) | met | met |
+| gridded wind | +0.14 | +0.03 | +0.2 | -0.13 (met, marginal) | -0.21 | -0.19 | 0.12 | 140.2 | met | met (marginal) | met | met |
+| gridded wind + pressure | +0.16 | +0.04 | +0.2 | -0.13 (met, marginal) | -0.21 | -0.19 | 0.12 | 140.8 | met | met (marginal) | met | met |
+
+Full validation output: `results/xaver_2013_gridwind/validation.md`,
+`results/xaver_2013_gridwind_pressure/validation.md`, and each run's own
+`validation_timeseries.png`/`flood_extent_delta.png` in the same two
+`results/` subfolders.
+
+### Interpretation
+
+The Vente storm-window overshoot narrows with gridded wind (+0.19 m →
++0.14 m) and stays narrower with pressure added (+0.16 m), an improvement but
+not a resolution. The systematic 8 Dec second-rise underestimate flagged in
+the baseline Findings is only slightly smaller with gridded forcing
+(Uostadvaris -0.24 m → -0.21 m, Nida -0.22 m → -0.19 m at both gridded
+variants) — still the same sign and roughly the same size, so replacing the
+uniform wind with the actual ERA5 field does not explain that miss on its own;
+the GTSM-boundary timing item ranked second in the baseline's Assumptions list
+remains a more likely candidate. Klaipeda storm RMSE (0.12 m) and the Nida C2
+rise error (-0.13 m, met marginal) are unchanged to two decimals across all
+three runs, all four success criteria still pass in every run, and adding
+pressure on top of gridded wind moves every number in the table by at most
+0.02 m or 0.6 km² relative to gridded wind alone (consistent with
+`pavbnd = 0` keeping the pressure effect local to the domain) — gridded
+forcing is a net neutral-to-positive change here, not a regression. The
+flooded-area drop (165.5 km² → ~140 km² with either gridded variant, about
+15%) is consistent with the ERA5 grid's wind over the delta being weaker or
+differently oriented than the Nida point value used everywhere in the
+baseline, but that mechanism was not isolated further and should be read as
+plausible, not confirmed.
 
 ## Reproducing from a clean checkout
 
