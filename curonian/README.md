@@ -113,10 +113,14 @@ below.
   the model is −0.24 m low at Uostadvaris (0.59 m vs gauge 0.83 m) and
   −0.22 m low at Nida (0.52 m vs gauge 0.74 m) — almost the same miss at two
   gauges roughly 60 km apart. That similarity is evidence the miss is
-  systematic (most likely missing spatial structure in the forcing) rather
-  than an artefact of moving the Nida station off its spec position, and it
-  strengthens the "uniform wind first" ranking in Assumptions to revisit
-  below.
+  systematic rather than an artefact of moving the Nida station off its
+  spec position, and at the time this was written it was read as pointing
+  at missing spatial structure in the wind field. It does not: the gridded
+  ERA5 wind sensitivity run (see "Sensitivity: gridded ERA5 wind and
+  pressure" below) reduced these two errors only from −0.24/−0.22 m to
+  −0.21/−0.19 m, so uniform wind does not explain this miss and the sea
+  boundary (its timing and high-frequency content, discussed above) is the
+  next target — see the reordered Assumptions to revisit below.
 - Vente: the table's peak error (+0.19 m at −60 h) is a window-max-to-
   window-max comparison, 60 h apart. At matching 06:00 readings on 6 Dec the
   model overshoots the setup peak by about 0.35 m (0.95 m modelled vs
@@ -132,25 +136,30 @@ below.
   includes the higher ground around Silute, though the station's own
   observation cell sits at 2.94 m and is excluded from the mask) stays
   essentially dry (C4: 0.00% flooded).
-- Assumptions to revisit, in the order the results suggest: (1) uniform wind
-  first — the Vente setup overshoot, the Nida peak-timing mismatch, and the
-  systematic 8 Dec 06:00 miss at both Uostadvaris and Nida (see above) all
-  point at missing spatial structure in the wind field that a single
-  uniform wind value (taken at Nida) cannot supply; (2) the GTSM boundary
-  next — its peak lands 25 h after the wind peak and the Klaipeda/
-  Uostadvaris gauge peaks, and it carries high-frequency energy the
-  once-daily gauge cannot confirm; (3) the 500 cm gauge-zero assumption
-  looks right as it stands — bias is within ±6 cm at all four gauges;
-  (4) channel dimensions and the Minija constant discharge — this event
-  gives no evidence either way.
+- Assumptions to revisit, reordered after the gridded-wind sensitivity run
+  below: (1) the GTSM boundary now ranks first — its peak lands 25 h after
+  the wind peak and the Klaipeda/Uostadvaris gauge peaks, it carries
+  high-frequency energy the once-daily gauge cannot confirm, and it is the
+  remaining candidate for the systematic 8 Dec 06:00 miss now that wind has
+  been tested and largely ruled out (next item); (2) wind spatial structure
+  — originally ranked first from the Vente setup overshoot, the Nida
+  peak-timing mismatch, and the 8 Dec 06:00 miss (see above), but testing it
+  directly (see "Sensitivity: gridded ERA5 wind and pressure") narrowed the
+  Vente overshoot (+0.19 m → +0.14 m) and cut flooded area by about 15%
+  while leaving the 8 Dec 06:00 miss almost unchanged (−0.24/−0.22 m →
+  −0.21/−0.19 m), so a uniform vs. gridded wind field is not the main driver
+  of that particular miss; (3) the 500 cm gauge-zero assumption looks right
+  as it stands — bias is within ±6 cm at all four gauges; (4) channel
+  dimensions and the Minija constant discharge — this event gives no
+  evidence either way.
 
 ## Sensitivity: gridded ERA5 wind and pressure
 
 The baseline run above forces SFINCS with a spatially uniform wind: the ERA5
 10 m wind at a single point (Nida) broadcast across the whole domain. Two
 sensitivity runs replace that with the actual ERA5 field over the lagoon, to
-test the "uniform wind first" item at the top of the baseline's Assumptions
-list above.
+test the wind-spatial-structure item in the baseline's Assumptions list
+above (that list is reordered above to reflect what these runs found).
 
 ### What changed
 
@@ -182,10 +191,7 @@ wind speed RMSE 0.000 m/s against the existing point series (well inside the
 
 ### Run log
 
-- Xaver 2013 gridded wind run (28 Nov–11 Dec 2013, `runs/xaver_2013_gridwind`):
-  24.2 min on 16 threads, mean dt 3.46 s.
-- Xaver 2013 gridded wind + pressure run (28 Nov–11 Dec 2013,
-  `runs/xaver_2013_gridwind_pressure`): 25.4 min on 16 threads, mean dt 3.46 s.
+Wall time and mean dt for both runs are in the main "Run log" section above.
 
 ### Comparison
 
@@ -215,19 +221,25 @@ the baseline Findings is only slightly smaller with gridded forcing
 (Uostadvaris -0.24 m → -0.21 m, Nida -0.22 m → -0.19 m at both gridded
 variants) — still the same sign and roughly the same size, so replacing the
 uniform wind with the actual ERA5 field does not explain that miss on its own;
-the GTSM-boundary timing item ranked second in the baseline's Assumptions list
-remains a more likely candidate. Klaipeda storm RMSE (0.12 m) and the Nida C2
-rise error (-0.13 m, met marginal) are unchanged to two decimals across all
-three runs, all four success criteria still pass in every run, and adding
-pressure on top of gridded wind moves every number in the table by at most
-0.02 m or 0.6 km² relative to gridded wind alone (consistent with
-`pavbnd = 0` keeping the pressure effect local to the domain) — gridded
-forcing is a net neutral-to-positive change here, not a regression. The
-flooded-area drop (165.5 km² → ~140 km² with either gridded variant, about
-15%) is consistent with the ERA5 grid's wind over the delta being weaker or
-differently oriented than the Nida point value used everywhere in the
-baseline, but that mechanism was not isolated further and should be read as
-plausible, not confirmed.
+the GTSM-boundary timing item, now ranked first in the reordered Assumptions
+list above, remains the more likely candidate. Klaipeda storm RMSE (0.12 m)
+and the Nida C2 rise error (-0.13 m, met marginal) are unchanged to two
+decimals across all three runs, all four success criteria still pass in every
+run, and adding pressure on top of gridded wind moves every number in the
+table by at most 0.02 m or 0.6 km² relative to gridded wind alone (consistent
+with `pavbnd = 0` keeping the pressure effect local to the domain) — gridded
+forcing is a net neutral-to-positive change here, not a regression. Nida's
+storm-window peak-dt swings widely (-67 h baseline, +0 h gridded wind, -68 h
+gridded wind + pressure, all in each run's own `validation.md`) because the
+window contains two separate maxima of comparable height (the model's own
+gale-driven peak on 5-6 Dec and the gauge's later peak on 8 Dec) and which one
+the tie-break in `skill()` lands on shifts with small changes in the series,
+not with a real change in timing — this figure is not informative here (see
+`validate.py`'s own note on peak-tie handling). The flooded-area drop
+(165.5 km² → ~140 km² with either gridded variant, about 15%) is consistent
+with the ERA5 grid's wind over the delta being weaker or differently oriented
+than the Nida point value used everywhere in the baseline, but that mechanism
+was not isolated further and should be read as plausible, not confirmed.
 
 ## Reproducing from a clean checkout
 

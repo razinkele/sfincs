@@ -21,6 +21,11 @@ def test_parse_args_grid_wind_and_pressure():
     assert args.run_name == "xaver_2013_gridwind_pressure"
 
 
+def test_parse_args_pressure_without_grid_wind_exits():
+    with pytest.raises(SystemExit):
+        bm.parse_args(["--pressure"])
+
+
 @pytest.mark.integration
 def test_built_model_passes_checks():
     run = common.RUN_XAVER

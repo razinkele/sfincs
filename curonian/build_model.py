@@ -40,7 +40,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--pressure", action="store_true",
                     help="also add gridded ERA5 mean sea level pressure forcing (needs --wind grid's era5_grid_xaver.nc)")
     p.add_argument("--run-name", default="xaver_2013", help="subdirectory of runs/ to build into")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.pressure and args.wind != "grid":
+        raise SystemExit("--pressure requires --wind grid")
+    return args
 
 
 def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "uniform", pressure: bool = False):
@@ -79,7 +82,7 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
     sf.setup_discharge_forcing(timeseries=_read_ts(inputs / "dis.csv"),
                                locations=gpd.read_file(inputs / "dis_points.geojson").set_index("index", drop=False))
     if wind == "grid":
-        sf.setup_wind_forcing_from_grid(wind=str(common.INPUTS / "era5_grid_xaver.nc"))
+        sf.setup_wind_forcing_from_grid(wind=str(inputs / "era5_grid_xaver.nc"))
     else:
         sf.setup_wind_forcing(timeseries=str(inputs / "wind.csv"))
     if pressure:
@@ -89,7 +92,7 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
         # ERA5 grid would double-count it. baro is already 1 in the written config
         # (also hydromt_sfincs' default), so SFINCS still applies the pressure
         # gradient force from netampfile inside the domain.
-        sf.setup_pressure_forcing_from_grid(press=str(common.INPUTS / "era5_grid_xaver.nc"))
+        sf.setup_pressure_forcing_from_grid(press=str(inputs / "era5_grid_xaver.nc"))
     sf.setup_observation_points(locations=gpd.read_file(inputs / "stations.geojson"))
     sf.write()
     r = check_model(run_dir)

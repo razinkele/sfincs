@@ -136,10 +136,13 @@ def main() -> xr.Dataset:
     with xr.open_dataset(raw) as raw_ds:
         ds = to_hydromt(raw_ds.load())
 
+    # Check the in-memory dataset before writing anything: if nida_check's assertion
+    # fails, no era5_grid_xaver.nc (or summary) should be left on disk to be picked up
+    # by a later build.
+    rmse = nida_check(ds)
+
     out = common.INPUTS / "era5_grid_xaver.nc"
     ds.to_netcdf(out, encoding={"time": {"units": "hours since 1970-01-01"}})
-
-    rmse = nida_check(ds)
 
     speed = np.hypot(ds["wind10_u"], ds["wind10_v"])
     speed.name = "speed"
