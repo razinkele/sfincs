@@ -1,6 +1,7 @@
 """Score the Xaver run against the gauges and draw the delta flood extent."""
 from __future__ import annotations
 
+import argparse
 import shutil
 from pathlib import Path
 
@@ -269,5 +270,12 @@ def main(run_dir: Path = common.RUN_XAVER) -> None:
         shutil.copy2(run_dir / fname, results_dir / fname)
 
 
+def parse_args(argv=None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--run", default="xaver_2013", help="runs/<name> to validate; results go to results/<name>")
+    return p.parse_args(argv)
+
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(run_dir=common.RUNS / args.run)

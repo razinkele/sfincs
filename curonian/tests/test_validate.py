@@ -2,7 +2,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import common
 import validate as va
+
+
+def test_parse_args_default_run_name():
+    args = va.parse_args([])
+    assert args.run == "xaver_2013"
+
+
+def test_parse_args_custom_run_name():
+    args = va.parse_args(["--run", "xaver_2013_gridwind"])
+    assert args.run == "xaver_2013_gridwind"
 
 
 def test_skill_on_synthetic_series():

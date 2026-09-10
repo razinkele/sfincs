@@ -4,6 +4,23 @@ import common
 import build_model as bm
 
 
+def test_parse_args_defaults():
+    args = bm.parse_args([])
+    assert args.no_subgrid is False
+    assert args.wind == "uniform"
+    assert args.pressure is False
+    assert args.run_name == "xaver_2013"
+
+
+def test_parse_args_grid_wind_and_pressure():
+    args = bm.parse_args(["--wind", "grid", "--pressure", "--run-name", "xaver_2013_gridwind_pressure",
+                           "--no-subgrid"])
+    assert args.no_subgrid is True
+    assert args.wind == "grid"
+    assert args.pressure is True
+    assert args.run_name == "xaver_2013_gridwind_pressure"
+
+
 @pytest.mark.integration
 def test_built_model_passes_checks():
     run = common.RUN_XAVER

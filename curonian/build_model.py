@@ -1,7 +1,7 @@
 """Assemble the Curonian Lagoon SFINCS model for Storm Xaver with HydroMT-SFINCS 1.2."""
 from __future__ import annotations
 
-import sys
+import argparse
 from pathlib import Path
 
 import geopandas as gpd
@@ -32,7 +32,18 @@ def _read_ts(path: Path) -> pd.DataFrame:
     return df
 
 
-def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True):
+def parse_args(argv=None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--no-subgrid", action="store_true", help="skip setup_subgrid (see README Limitations)")
+    p.add_argument("--wind", choices=("uniform", "grid"), default="uniform",
+                    help="uniform: the Nida point series (wind.csv); grid: gridded ERA5 wind (era5_grid_xaver.nc)")
+    p.add_argument("--pressure", action="store_true",
+                    help="also add gridded ERA5 mean sea level pressure forcing (needs --wind grid's era5_grid_xaver.nc)")
+    p.add_argument("--run-name", default="xaver_2013", help="subdirectory of runs/ to build into")
+    return p.parse_args(argv)
+
+
+def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "uniform", pressure: bool = False):
     from hydromt_sfincs import SfincsModel
 
     inputs = common.INPUTS
@@ -67,7 +78,18 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True):
                                 locations=gpd.read_file(inputs / "boundary_points.geojson").set_index("index", drop=False))
     sf.setup_discharge_forcing(timeseries=_read_ts(inputs / "dis.csv"),
                                locations=gpd.read_file(inputs / "dis_points.geojson").set_index("index", drop=False))
-    sf.setup_wind_forcing(timeseries=str(inputs / "wind.csv"))
+    if wind == "grid":
+        sf.setup_wind_forcing_from_grid(wind=str(common.INPUTS / "era5_grid_xaver.nc"))
+    else:
+        sf.setup_wind_forcing(timeseries=str(inputs / "wind.csv"))
+    if pressure:
+        # pavbnd stays 0 (hydromt_sfincs' own default, unchanged here): the GTSM
+        # boundary series already carries the inverse-barometer effect baked in from
+        # its own reanalysis, so re-applying a boundary pressure correction from this
+        # ERA5 grid would double-count it. baro is already 1 in the written config
+        # (also hydromt_sfincs' default), so SFINCS still applies the pressure
+        # gradient force from netampfile inside the domain.
+        sf.setup_pressure_forcing_from_grid(press=str(common.INPUTS / "era5_grid_xaver.nc"))
     sf.setup_observation_points(locations=gpd.read_file(inputs / "stations.geojson"))
     sf.write()
     r = check_model(run_dir)
@@ -100,4 +122,5 @@ def check_model(run_dir: Path = common.RUN_XAVER) -> dict:
 
 
 if __name__ == "__main__":
-    build(subgrid="--no-subgrid" not in sys.argv)
+    args = parse_args()
+    build(run_dir=common.RUNS / args.run_name, subgrid=not args.no_subgrid, wind=args.wind, pressure=args.pressure)
