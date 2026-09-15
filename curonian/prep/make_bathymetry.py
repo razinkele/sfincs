@@ -43,8 +43,14 @@ def isobath_points(iso: gpd.GeoDataFrame, lagoon: Polygon, spacing: float = 50.0
         for line in getattr(geom, "geoms", [geom]):
             coords = np.asarray(line.segmentize(spacing).coords)
             xs.append(coords[:, 0]); ys.append(coords[:, 1]); ds.append(np.full(len(coords), float(depth)))
-    shore = np.asarray(lagoon.exterior.segmentize(spacing).coords)
-    xs.append(shore[:, 0]); ys.append(shore[:, 1]); ds.append(np.zeros(len(shore)))
+    # Depth-0 anchors on every shoreline the lagoon has -- the outer shore AND each
+    # island. Without the interiors the interpolator sees no shallow constraint against
+    # an island and carries the surrounding isobath depth right up to its bank, which is
+    # wrong wherever an island sits in deeper water. The lagoon has 13 of them (~55 km2),
+    # Rusne (~45 km2) being the one that matters, in the delta the flood metrics score.
+    for ring in (lagoon.exterior, *lagoon.interiors):
+        shore = np.asarray(ring.segmentize(spacing).coords)
+        xs.append(shore[:, 0]); ys.append(shore[:, 1]); ds.append(np.zeros(len(shore)))
     xy = np.column_stack([np.concatenate(xs), np.concatenate(ys)])
     depth = np.concatenate(ds)
     xy, idx = np.unique(np.round(xy, 1), axis=0, return_index=True)

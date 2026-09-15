@@ -55,3 +55,27 @@ def test_lagoon_polygon_returns_a_single_polygon_not_a_multipolygon():
     assert isinstance(poly, Polygon)
     assert poly.geom_type == "Polygon"
     assert poly.exterior is not None
+
+
+def test_isobath_points_anchors_island_shorelines_at_zero():
+    """Islands need a 0 m depth anchor on their own shoreline, like the outer shore.
+
+    Only the exterior ring was anchored, so water right against an island was
+    interpolated from the surrounding isobaths alone and came out too deep. The real
+    lagoon has 13 island holes totalling ~55 km2, the largest being Rusne (~45 km2)
+    in the delta, so this is not a corner case.
+    """
+    lagoon = Polygon(
+        shell=[(0, 0), (1000, 0), (1000, 1000), (0, 1000)],
+        holes=[[(400, 400), (600, 400), (600, 600), (400, 600)]],
+    )
+    iso = gpd.GeoDataFrame(
+        {"depth": [2.0]}, geometry=[LineString([(100, 200), (900, 200)])], crs=common.CRS)
+
+    xy, depth = mb.isobath_points(iso, lagoon, spacing=50.0)
+    zeros = xy[depth == 0.0]
+
+    on_island_edge = np.abs(zeros - np.array([500.0, 400.0])).sum(axis=1).min()
+    assert on_island_edge < 1.0, "no zero-depth anchor on the island shoreline"
+    corner = np.abs(zeros - np.array([600.0, 600.0])).sum(axis=1).min()
+    assert corner < 1.0, "island ring not segmentized all the way round"

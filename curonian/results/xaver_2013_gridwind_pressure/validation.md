@@ -7,18 +7,18 @@ Whole period: 2013-11-28 00:00 to 2013-12-11 00:00
 | Klaipeda | 13 | -0.01 | 0.09 | 0.90 | +0.12 | +26 |
 | Nida | 26 | -0.00 | 0.10 | 0.76 | -0.08 | +48 |
 | Vente | 26 | +0.06 | 0.11 | 0.75 | +0.16 | -60 |
-| Uostadvaris | 13 | -0.06 | 0.09 | 0.88 | +0.04 | +0 |
+| Uostadvaris | 13 | -0.05 | 0.09 | 0.88 | +0.04 | +0 |
 
 Storm window: 2013-12-05 00:00 to 2013-12-09 00:00
 
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 4 | -0.03 | 0.12 | 0.72 | +0.12 | +26 |
-| Nida | 8 | -0.02 | 0.14 | 0.38 | -0.12 | -68 |
+| Nida | 8 | -0.02 | 0.14 | 0.39 | -0.12 | -68 |
 | Vente | 8 | +0.07 | 0.14 | 0.35 | +0.16 | -60 |
 | Uostadvaris | 4 | -0.05 | 0.11 | 0.77 | +0.04 | +0 |
 
-Flooded land in the delta window (depth > 5 cm, ground > 0 m): **140.8 km²**
+Flooded land in the delta window (depth > 5 cm, ground > 0 m): **140.9 km²**
 
 ### Success criteria (spec section 9)
 - C1 Uostadvaris peak [2013-12-05 00:00 to 2013-12-09 00:00]: **met** -- model peak 2013-12-06 06:10, peak err +0.04 m, dt +0.2 h (threshold: peak err within +/-0.15 m and |dt| <= 6 h)

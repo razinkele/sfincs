@@ -30,6 +30,16 @@ Tests: `micromamba run -n hydromt-sfincs python -m pytest tests -q`
   24.2 min on 16 threads, mean dt 3.46 s.
 - Xaver 2013 gridded wind + pressure run (28 Nov–11 Dec 2013,
   `runs/xaver_2013_gridwind_pressure`): 25.4 min on 16 threads, mean dt 3.46 s.
+- 2026-09-15: all three runs rebuilt and rerun after the island-shoreline
+  bathymetry correction and the millimetre-precision regeneration of the
+  committed inputs (see the cleanup sweep in
+  `../docs/superpowers/plans/2026-09-04-curonian-lagoon-xaver-model-followups.md`),
+  so the numbers below match the code that produced them. Baseline 38.4 min,
+  gridded wind 26.3 min, gridded wind + pressure 28.0 min on 16 threads; mean dt
+  3.464 s in all three, unchanged. The baseline's longer wall time is machine
+  load during that run (15-minute load average peaked near 79 on 28 cores), not
+  a model change. Every number that moved is recorded below; all four success
+  criteria stayed met in all three runs.
 
 ## Results: Xaver 2013
 
@@ -59,14 +69,14 @@ Storm window: 2013-12-05 00:00 to 2013-12-09 00:00
 | Vente | 8 | +0.05 | 0.16 | 0.34 | +0.19 | -60 |
 | Uostadvaris | 4 | -0.06 | 0.14 | 0.75 | +0.08 | +0 |
 
-Flooded land in the delta window (depth > 5 cm, ground > 0 m): **165.5 km²**
+Flooded land in the delta window (depth > 5 cm, ground > 0 m): **165.6 km²**
 
 ### Success criteria (spec section 9)
 - C1 Uostadvaris peak [2013-12-05 00:00 to 2013-12-09 00:00]: **met** -- model peak 2013-12-06 06:20, peak err +0.08 m, dt +0.3 h (threshold: peak err within +/-0.15 m and |dt| <= 6 h)
 - C2 Nida 8 Dec rise [2013-12-07 06:00 to 2013-12-08 18:00]: **met (marginal)** -- model 0.46 m -> 0.71 m vs gauge 0.84 m, err -0.13 m, rise reproduced (threshold: err within +/-0.15 m (<=0.10 m for a clean 'met'), rise reproduced in sign)
 - C3 Klaipeda RMSE [2013-12-05 00:00 to 2013-12-09 00:00]: **met** -- storm RMSE 0.12 m (whole-period RMSE 0.08 m) (threshold: storm-window RMSE <= 0.15 m)
 - C4 Silute uplands [delta window (325000, 6105000, 360000, 6145000)]: **met** -- 0.00% of land with ground > 3 m flooded (threshold: < 1 % flooded)
-- Info: Uostadvaris 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.59 m vs gauge 0.83 m, err -0.24 m (threshold: n/a (context only))
+- Info: Uostadvaris 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.60 m vs gauge 0.83 m, err -0.23 m (threshold: n/a (context only))
 - Info: Nida 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.52 m vs gauge 0.74 m, err -0.22 m (threshold: n/a (context only))
 
 Forcing as run (`inputs/forcing_summary.txt`): GTSM boundary offset +0.092 m
@@ -110,14 +120,14 @@ below.
   Rusne and Silute all had to be moved 0.2–1.2 km into wet cells to get a
   usable point series (see Run log).
 - The second rise is missed at both gauges, not just Nida: at 8 Dec 06:00
-  the model is −0.24 m low at Uostadvaris (0.59 m vs gauge 0.83 m) and
+  the model is −0.23 m low at Uostadvaris (0.60 m vs gauge 0.83 m) and
   −0.22 m low at Nida (0.52 m vs gauge 0.74 m) — almost the same miss at two
   gauges roughly 60 km apart. That similarity is evidence the miss is
   systematic rather than an artefact of moving the Nida station off its
   spec position, and at the time this was written it was read as pointing
   at missing spatial structure in the wind field. It does not: the gridded
   ERA5 wind sensitivity run (see "Sensitivity: gridded ERA5 wind and
-  pressure" below) reduced these two errors only from −0.24/−0.22 m to
+  pressure" below) reduced these two errors only from −0.23/−0.22 m to
   −0.21/−0.19 m, so uniform wind does not explain this miss and the sea
   boundary (its timing and high-frequency content, discussed above) is the
   next target — see the reordered Assumptions to revisit below.
@@ -125,7 +135,7 @@ below.
   window-max comparison, 60 h apart. At matching 06:00 readings on 6 Dec the
   model overshoots the setup peak by about 0.35 m (0.95 m modelled vs
   0.60 m gauge) and tracks the gauge well afterwards; RMSE 0.12 m overall.
-- Flooded area: 165.5 km² of land floods in the delta window (depth > 5 cm,
+- Flooded area: 165.6 km² of land floods in the delta window (depth > 5 cm,
   ground > 0 m only). This is a lower bound on inundation extent — cells at
   or below 0 m ground are excluded — but likely an overestimate of real
   flooding, since the model has no drainage or pumping, the modelled
@@ -146,7 +156,7 @@ below.
   peak-timing mismatch, and the 8 Dec 06:00 miss (see above), but testing it
   directly (see "Sensitivity: gridded ERA5 wind and pressure") narrowed the
   Vente overshoot (+0.19 m → +0.14 m) and cut flooded area by about 15%
-  while leaving the 8 Dec 06:00 miss almost unchanged (−0.24/−0.22 m →
+  while leaving the 8 Dec 06:00 miss almost unchanged (−0.23/−0.22 m →
   −0.21/−0.19 m), so a uniform vs. gridded wind field is not the main driver
   of that particular miss; (3) the 500 cm gauge-zero assumption looks right
   as it stands — bias is within ±6 cm at all four gauges; (4) channel
@@ -203,9 +213,9 @@ are the C1 line's, which carries one more decimal than the table).
 
 | run | Vente storm peak err m | Uostadvaris peak err m | Uostadvaris peak dt h | Nida C2 err m (verdict) | Uostadvaris 8 Dec 06:00 err m | Nida 8 Dec 06:00 err m | Klaipeda storm RMSE m | flooded area km² | C1 | C2 | C3 | C4 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| baseline (uniform wind) | +0.19 | +0.08 | +0.3 | -0.13 (met, marginal) | -0.24 | -0.22 | 0.12 | 165.5 | met | met (marginal) | met | met |
-| gridded wind | +0.14 | +0.03 | +0.2 | -0.13 (met, marginal) | -0.21 | -0.19 | 0.12 | 140.2 | met | met (marginal) | met | met |
-| gridded wind + pressure | +0.16 | +0.04 | +0.2 | -0.13 (met, marginal) | -0.21 | -0.19 | 0.12 | 140.8 | met | met (marginal) | met | met |
+| baseline (uniform wind) | +0.19 | +0.08 | +0.3 | -0.13 (met, marginal) | -0.23 | -0.22 | 0.12 | 165.6 | met | met (marginal) | met | met |
+| gridded wind | +0.14 | +0.03 | +0.2 | -0.13 (met, marginal) | -0.21 | -0.19 | 0.12 | 140.3 | met | met (marginal) | met | met |
+| gridded wind + pressure | +0.16 | +0.04 | +0.2 | -0.13 (met, marginal) | -0.21 | -0.19 | 0.12 | 140.9 | met | met (marginal) | met | met |
 
 Full validation output: `results/xaver_2013_gridwind/validation.md`,
 `results/xaver_2013_gridwind_pressure/validation.md`, and each run's own
@@ -218,9 +228,10 @@ The Vente storm-window overshoot narrows with gridded wind (+0.19 m →
 +0.14 m) and stays narrower with pressure added (+0.16 m), an improvement but
 not a resolution. The systematic 8 Dec second-rise underestimate flagged in
 the baseline Findings is only slightly smaller with gridded forcing
-(Uostadvaris -0.24 m → -0.21 m, Nida -0.22 m → -0.19 m at both gridded
-variants) — still the same sign and roughly the same size, so replacing the
-uniform wind with the actual ERA5 field does not explain that miss on its own;
+(Uostadvaris -0.23 m → -0.21 m, Nida -0.22 m → -0.19 m at both gridded
+variants) — a 0.02 m improvement against a miss of more than 0.20 m, so the sign
+and very nearly the size survive: replacing the uniform wind with the actual ERA5
+field does not explain that miss on its own;
 the GTSM-boundary timing item, now ranked first in the reordered Assumptions
 list above, remains the more likely candidate. Klaipeda storm RMSE (0.12 m)
 and the Nida C2 rise error (-0.13 m, met marginal) are unchanged to two
@@ -236,7 +247,7 @@ gale-driven peak on 5-6 Dec and the gauge's later peak on 8 Dec) and which one
 the tie-break in `skill()` lands on shifts with small changes in the series,
 not with a real change in timing — this figure is not informative here (see
 `validate.py`'s own note on peak-tie handling). The flooded-area drop
-(165.5 km² → ~140 km² with either gridded variant, about 15%) is consistent
+(165.6 km² → ~140 km² with either gridded variant, about 15%) is consistent
 with the ERA5 grid's wind over the delta being weaker or differently oriented
 than the Nida point value used everywhere in the baseline, but that mechanism
 was not isolated further and should be read as plausible, not confirmed.

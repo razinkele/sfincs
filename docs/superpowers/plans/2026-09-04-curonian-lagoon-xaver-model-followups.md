@@ -47,3 +47,150 @@ Collected from the execution ledger before the workspace was removed. The final 
 ## Parked at the end
 - Final: parked — validate.criteria C4 divides by the count of >3 m land pixels; NaN → "not met" if a window had no uplands — Ruling: real but unreachable for the delta window; guard in a follow-up. Costs if wrong: a misleading verdict on a different window.
 - Final: parked — criteria tests cover one met/one not-met per criterion but not the |dt|>6 h branch of C1 — Ruling: meets the brief; broaden in a follow-up.
+
+---
+
+# Resolution sweep — 2026-09-15
+
+Every item above is dispositioned below. Statuses: **done** (fixed in this sweep),
+**already done** (closed by commits 6cb61f3 / f843bd3, after this doc was written),
+**moot** (the artefact no longer exists), **n/a** (an observation, not an action).
+
+## Found during the sweep, not in the list above
+
+- **BLOCKER — the checkout was renamed `~/SFINCS` → `~/sfincs` and three paths did not
+  follow.** `data_catalog.yml`'s `root: /home/razinka/SFINCS/curonian` made every
+  relative catalogue path (`inputs/lagoon_bathy_50m.tif`, `channels.geojson`,
+  `active_region.geojson`, `boundary_ring.geojson`) resolve under a directory that does
+  not exist, so `build_model.py` could not run at all; `common.SFINCS_BIN` and
+  `common.RUN_SFINCS_SH` were dead; the top-level README taught six wrong paths. This is
+  what the two failing tests at the start of the sweep were reporting — the handoff's
+  "51 tests green" was stale (actual: 49 passed, 2 failed). Fixed by deriving from
+  `common.ROOT` (`REPO = ROOT.parent`) and setting the catalogue to `root: .`, which
+  resolves against the yml's own directory. `tests/test_common.py::
+  test_repo_paths_are_derived_from_this_file_not_hardcoded` guards it; verified RED
+  against the old hardcoded constant before fixing. `run_sfincs.sh` was already correct
+  (it derives its own path from `BASH_SOURCE`).
+- **README claimed `inputs/gtsm_klaipeda.csv` is git-ignored; it is tracked.** The
+  reproduction section told a clean checkout to regenerate the "GTSM zip/CSV" and so to
+  obtain `~/.cdsapirc`. Only the zip and its extracted directory are ignored — the
+  derived CSV is committed. Rewritten, and the ERA5 grid NetCDFs (genuinely ignored, and
+  needed for `--wind grid`) added to the list.
+
+## Task 0
+
+- **done** — sqlite URI not percent-encoded → `common._db_uri()`, `urllib.parse.quote`.
+  Unescaped `?`/`#` would silently open the wrong file.
+- **already done** — `read_table` connection closing via `contextlib.closing`.
+
+## Task 1
+
+- **done** — island interiors got no depth-0 anchor. `isobath_points()` now loops
+  `(lagoon.exterior, *lagoon.interiors)`. The lagoon has 13 island holes totalling
+  ~55 km², the largest being Rusnė at ~45 km² with 35.7 km of shoreline, in the delta
+  the flood metrics score — so this is a real bathymetry correction, not a nicety.
+  **Effect measured at 50 m: 520 of 640 408 cells move by >1 cm (0.08 %), 341 by >10 cm,
+  mean change +0.0001 m, extremes +1.92 / −1.31 m.** Local, as the geometry implies.
+- **done** — interpolator evaluated over the full bbox before masking. The lagoon mask is
+  now built first and the interpolators are evaluated only on cells inside it.
+  **Proved a no-op**: bit-identical values and NaN pattern against the pre-change output
+  at 200 m, checked *before* the island anchors were added so the two changes could not
+  mask each other. Runtime for the 50 m grid is now ~13 s (2.78M candidate cells →
+  640 408 evaluated).
+- **done** — `lagoon_polygon()` return type now tested explicitly; everything downstream
+  assumes a single `Polygon` and `.area` (the only previous check) answers for a
+  `MultiPolygon` too.
+- **already done** — report rationale about the ≤10 m filter being load-bearing.
+- **already done** — clamp and assert tightened from 20 m to 10 m.
+
+## Task 2
+
+- **done** — `except Exception` in `main()` narrowed to
+  `(requests.RequestException, RuntimeError)`. A `TypeError`/`KeyError` in our own client
+  code now propagates instead of silently downgrading a committed input to fallback
+  coordinates. `RuntimeError` stays in the tuple: it is `fetch_osm_rivers`' own
+  "Overpass returned no ways".
+- **done** — bare asserts in `build_channels` → `ValueError` with the measured length in
+  the message. `python -O` strips asserts; these guard committed geometry.
+- **done** — `_merge` now prints which segments it discarded and how long they were.
+- **moot** — `task-2-report.md` self-checks: the SDD workspace was removed, no such file.
+
+## Task 3
+
+- **done** — `mouth_radius` 2600 duplicated `boundary_ring`'s `r_out` → `MOUTH_R_OUT`
+  and `MOUTH_R_IN`, read at call time (not bound as default arguments, which would
+  defeat the point). A test monkeypatches the constant and asserts both the ring's outer
+  edge and the active region's mouth disc follow it.
+- **done** — docstrings added to `make_geometries`' functions.
+- **done** — committed GeoJSON at full float64 precision → `common.write_geojson()`
+  (GDAL `COORDINATE_PRECISION=3`, i.e. millimetres in a projected CRS). Verified
+  precision-only: max Hausdorff shift across all six files is 0.68 mm.
+- **n/a** — "active region 4300 km² is 200 km² under the 4500 ceiling": an observation
+  about headroom, not a defect. Unchanged at 4300 km² after regeneration.
+
+## Task 5
+
+- **done** — `series_from_files` dedup and `(stations, time)` dim-order branches now
+  tested; `sort_index(kind="stable")` so the month-file overlap resolves the same way
+  every run (verified RED: the second file's value won before the fix).
+- **done** — CSV float repr noise → `common.CSV_FLOAT_FMT = "%.3f"` on every forcing
+  write. Millimetre water level, mm/s wind, thousandth of a m³/s.
+- **done** — assert-based validation in `fetch_gtsm` (gappy series, station distance)
+  and `make_forcing` (boundary, wind, discharge, CMEMS) → `ValueError` with diagnostics.
+
+## Task 6
+
+- **done** — `test_bias_correct` window clipping now tested: observations far outside
+  the calm window would move the offset by ~5 m if they leaked in.
+- **already done** — explicit 06:00 filter on the Klaipėda series.
+
+## Task 7
+
+- **done** — `manning_land` **verified, then aligned**. `sfincs_subgrid.nc`'s `uv_navg`
+  spans 0.0200–0.0600, so `setup_subgrid`'s 0.06 did reach the subgrid tables and the
+  `manning_land = 0.04` in `sfincs.inp` was genuinely inert. The inp keyword is now
+  written to match (`MANNING_LAND`/`MANNING_SEA` in `build_model.py`), with a test
+  asserting inp and tables agree.
+- **done** — hardcoded probe coordinates and ring tolerance → `OPEN_LAGOON_PROBE` and
+  `BND_RING_TOL_M`, plus a test that the probe lies inside the active region (a probe
+  outside it would make `check_model`'s `connected` result meaningless).
+
+## Task 8
+
+- **already done** — README states the 0.2–1.2 km station moves.
+- **already done** — `STATIONS_LONLAT` carries the relocation comment.
+
+## Task 9
+
+- **done** — south-up regression. The old test varied ground by *column*, so a row flip
+  left the area identical and it passed either way; and `flood_map()` returns an area,
+  which is orientation-invariant, so the regression is invisible at that level. New
+  tests assert orientation on `_flood_arrays` directly (gy descending, row 0 = north)
+  for **both** the `dep_subgrid.tif` branch and the `zb` fallback. Proved by sabotage:
+  removing each flip fails the new tests while the old one still passes.
+
+## Parked items
+
+- **done** — C4 divided by the count of >3 m land pixels, so a window with no uplands
+  gave 0/0 = NaN and `NaN < 1.0` = False, i.e. **"not met"** — a model failure for a
+  criterion that measured nothing. Now `c4_verdict()`; ruling: report **"n/a"**, since a
+  criterion with no data is neither passed nor failed and `criteria()` already carries a
+  non-pass/fail verdict ("info").
+- **done** — the `|dt| > 6 h` branch of C1 now has a test (right peak height, 60 h late
+  → "not met"), proved by sabotage.
+
+## Verification
+
+Suite went from **52 tests with 2 failing** to **76 tests, all green** (24 added).
+A run shows either "76 passed" or "75 passed, 1 skipped" depending on whether
+Overpass answers: `test_fetch_osm_rivers_returns_both_distributaries` skips on a
+5xx rather than failing the suite for someone else's outage. Every fix
+that could be driven RED-first was; the three pure coverage-gap items (row flip, C1
+timing, dim-order branch) were proved by sabotaging the production code and watching the
+new tests fail while the old ones passed.
+
+All three runs were rebuilt and rerun after the input changes so `results/` still matches
+the code that produced it. `prep.make_channels` was deliberately **not** re-run — Overpass
+is live data and could return different centrelines, which would be an uncontrolled second
+change; `inputs/channels.geojson` was rewritten from the committed file at mm precision
+instead, preserving its `['fixed', 'osm', 'osm']` provenance.
