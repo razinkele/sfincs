@@ -1,0 +1,92 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "Curonian Lagoon SFINCS model: Storm Xaver 2013 hindcast"
+abstract: >-
+  A whole-lagoon compound-flood model of the Curonian Lagoon (Lithuania) built
+  with HydroMT-SFINCS and run on a Linux build of SFINCS v2.4.0, together with
+  the reproducible preparation, build and validation pipeline. The first
+  hindcast covers Storm Xaver, 28 November - 11 December 2013, validated against
+  four water-level gauges in three forcing variants.
+authors:
+  - family-names: "Razinkovas-Baziukas"
+    given-names: "Arturas"
+    affiliation: "Klaipeda University"
+    # orcid: "https://orcid.org/0000-0000-0000-0000"   # add yours
+repository-code: "https://github.com/razinkele/sfincs"
+license: GPL-3.0-or-later
+keywords:
+  - SFINCS
+  - compound flooding
+  - Curonian Lagoon
+  - storm surge
+  - Storm Xaver
+  - hydrodynamic modelling
+# doi: "10.5281/zenodo.XXXXXXX"   # added once the first Zenodo release is archived
+references:
+  - type: article
+    title: >-
+      Modeling compound flooding in coastal systems using a computationally
+      efficient reduced-physics solver: Including fluvial, pluvial, tidal,
+      wind- and wave-driven processes
+    authors:
+      - family-names: "Leijnse"
+        given-names: "Tim"
+      - family-names: "van Ormondt"
+        given-names: "Maarten"
+      - family-names: "Nederhoff"
+        given-names: "Kees"
+      - family-names: "van Dongeren"
+        given-names: "Ap"
+    journal: "Coastal Engineering"
+    volume: 163
+    start: 103796
+    year: 2021
+    doi: "10.1016/j.coastaleng.2020.103796"
+  - type: article
+    title: "HydroMT: Automated and reproducible model building and analysis"
+    authors:
+      - family-names: "Eilander"
+        given-names: "Dirk"
+      - family-names: "Boisgontier"
+        given-names: "Helene"
+      - family-names: "Bouaziz"
+        given-names: "Laurene"
+    journal: "The Journal of Open Source Software"
+    volume: 8
+    issue: 83
+    start: 4897
+    year: 2023
+    doi: "10.21105/joss.04897"
+  - type: article
+    title: "The ERA5 global reanalysis"
+    authors:
+      - family-names: "Hersbach"
+        given-names: "Hans"
+      - family-names: "Bell"
+        given-names: "Bill"
+      - family-names: "Berrisford"
+        given-names: "Paul"
+    journal: "Quarterly Journal of the Royal Meteorological Society"
+    volume: 146
+    issue: 730
+    start: 1999
+    end: 2049
+    year: 2020
+    doi: "10.1002/qj.3803"
+  - type: article
+    title: >-
+      A high-resolution global dataset of extreme sea levels, tides, and storm
+      surges, including future projections
+    authors:
+      - family-names: "Muis"
+        given-names: "Sanne"
+      - family-names: "Irazoqui Apecechea"
+        given-names: "Maialen"
+      - family-names: "Dullaart"
+        given-names: "Job"
+    journal: "Frontiers in Marine Science"
+    volume: 7
+    start: 263
+    year: 2020
+    doi: "10.3389/fmars.2020.00263"

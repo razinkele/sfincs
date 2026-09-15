@@ -128,8 +128,12 @@ literature one.
 > Razinkovas-Baziukas, A. (2026). *Curonian Lagoon SFINCS model: Storm Xaver
 > 2013 hindcast* [Software]. https://github.com/razinkele/sfincs
 
-For a citable, versioned snapshot, mint a DOI by linking the repository to
-Zenodo and cutting a release; add the DOI here when you do.
+Machine-readable metadata is in [`CITATION.cff`](CITATION.cff) (which GitHub
+renders as a "Cite this repository" button) and [`.zenodo.json`](.zenodo.json),
+which Zenodo reads when it archives a release. Both already carry the verified
+references below as related identifiers. Add the Zenodo DOI to all three places
+once the first release is archived — the commented `doi:` line in
+`CITATION.cff`, the citation above, and a badge here.
 
 **Model engine**
 
@@ -182,6 +186,23 @@ Hydrometeorological Service (LHMT), whose open data is CC BY-SA 4.0 and
 **requires attribution**. Channel centrelines come from OpenStreetMap
 contributors, ODbL. The 5 m DEM of the lower Nemunas is a third-party dataset
 held locally (see `curonian/data_catalog.yml`) and is not redistributed here.
+
+## Licence
+
+This repository's own code — the `curonian/` model pipeline, `run_sfincs.sh`,
+the test models and the documentation — is licensed under the **GNU GPL-3.0-or-later**
+([`LICENSE`](LICENSE)), matching SFINCS itself, which it builds and drives.
+
+That licence does **not** extend to the third-party material referenced here,
+which keeps its own terms:
+
+| Material | Terms |
+| --- | --- |
+| SFINCS source and executable (not redistributed here) | GNU GPL-3.0 upstream; the Deltares freeware executable has its own conditions, kept in this repo |
+| Gauge water levels and river discharge | © Lithuanian Hydrometeorological Service, CC BY-SA 4.0 — **attribution required** |
+| Channel centrelines | © OpenStreetMap contributors, ODbL |
+| ERA5, GTSM, EMODnet | Each provider's own terms; see the Citation section |
+| 5 m DEM of the lower Nemunas | Third-party, held locally, not redistributed |
 
 ## Models built on this SFINCS build
 

@@ -1,0 +1,29 @@
+{
+  "title": "Curonian Lagoon SFINCS model: Storm Xaver 2013 hindcast",
+  "upload_type": "software",
+  "description": "<p>A whole-lagoon compound-flood model of the Curonian Lagoon (Lithuania), built with HydroMT-SFINCS and run on a Linux build of SFINCS v2.4.0 Galibier, together with the reproducible preparation, build and validation pipeline.</p><p>The first hindcast covers Storm Xaver, 28 November - 11 December 2013, in three forcing variants (spatially uniform wind, gridded ERA5 wind, gridded wind plus mean sea level pressure). All three are validated against four water-level gauges and meet all four success criteria defined in the model specification.</p><p>Raw source data (the 5 m DEM, the gauge database, and the SFINCS executable itself) are not redistributed here; see the repository README for what a clone must regenerate.</p>",
+  "license": "GPL-3.0-or-later",
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Razinkovas-Baziukas, Arturas",
+      "affiliation": "Klaipeda University"
+    }
+  ],
+  "keywords": [
+    "SFINCS",
+    "compound flooding",
+    "Curonian Lagoon",
+    "storm surge",
+    "Storm Xaver",
+    "hydrodynamic modelling",
+    "HydroMT",
+    "Lithuania"
+  ],
+  "related_identifiers": [
+    { "identifier": "10.1016/j.coastaleng.2020.103796", "relation": "isDerivedFrom", "scheme": "doi", "resource_type": "publication-article" },
+    { "identifier": "10.21105/joss.04897",              "relation": "isDerivedFrom", "scheme": "doi", "resource_type": "publication-article" },
+    { "identifier": "10.1002/qj.3803",                  "relation": "references",    "scheme": "doi", "resource_type": "publication-article" },
+    { "identifier": "10.3389/fmars.2020.00263",         "relation": "references",    "scheme": "doi", "resource_type": "publication-article" }
+  ]
+}
