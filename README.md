@@ -129,18 +129,25 @@ literature one.
 **This repository**
 
 > Razinkovas-Baziukas, A. (2026). *Curonian Lagoon SFINCS model: Storm Xaver
-> 2013 hindcast* (Version v1.0.0) [Software]. Zenodo.
+> 2013 hindcast* (Version v1.0.1) [Software]. Zenodo.
 > https://doi.org/10.5281/zenodo.22772337
 
-Two DOIs exist, and which one you want depends on the claim you are making:
+Every release is archived under its own DOI, with one concept DOI standing for
+all of them. Which you want depends on the claim you are making:
 
 | DOI | Resolves to | Use it when |
 | --- | --- | --- |
 | [10.5281/zenodo.22772337](https://doi.org/10.5281/zenodo.22772337) | always the newest version | citing the software in general |
-| [10.5281/zenodo.22772338](https://doi.org/10.5281/zenodo.22772338) | v1.0.0 specifically | reproducing a published result |
+| [10.5281/zenodo.22772551](https://doi.org/10.5281/zenodo.22772551) | v1.0.1 specifically | reproducing a published result |
+| [10.5281/zenodo.22772338](https://doi.org/10.5281/zenodo.22772338) | v1.0.0 specifically | citing the first release |
 
 For a paper, cite the **version** DOI — it is the one that pins the exact code a
 result came from.
+
+The v1.0.0 record predates the citation-metadata corrections in v1.0.1 and
+records the author as "Arturas Razinkovas-Baziukas, Klaipeda University" with no
+ORCID. The model, code and results it archives are unaffected — v1.0.1 changed
+metadata only — so prefer v1.0.1 or later where the choice is open.
 
 Machine-readable metadata is in [`CITATION.cff`](CITATION.cff) (GitHub renders it
 as a "Cite this repository" button) and [`.zenodo.json`](.zenodo.json), which

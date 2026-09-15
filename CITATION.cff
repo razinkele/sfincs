@@ -15,6 +15,8 @@ authors:
     orcid: "https://orcid.org/0000-0001-5060-5532"
 repository-code: "https://github.com/razinkele/sfincs"
 license: GPL-3.0-or-later
+version: 1.0.1
+date-released: 2026-09-15
 keywords:
   - SFINCS
   - compound flooding
@@ -29,6 +31,9 @@ identifiers:
   - type: doi
     value: "10.5281/zenodo.22772337"
     description: "Concept DOI - all versions"
+  - type: doi
+    value: "10.5281/zenodo.22772551"
+    description: "Version DOI - v1.0.1"
   - type: doi
     value: "10.5281/zenodo.22772338"
     description: "Version DOI - v1.0.0"
