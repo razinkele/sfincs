@@ -10,8 +10,8 @@ abstract: >-
   four water-level gauges in three forcing variants.
 authors:
   - family-names: "Razinkovas-Baziukas"
-    given-names: "Arturas"
-    affiliation: "Klaipeda University"
+    given-names: "Artūras"
+    affiliation: "Klaipėda University"
     # orcid: "https://orcid.org/0000-0000-0000-0000"   # add yours
 repository-code: "https://github.com/razinkele/sfincs"
 license: GPL-3.0-or-later
