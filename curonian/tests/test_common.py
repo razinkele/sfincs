@@ -35,6 +35,18 @@ def test_read_table_reads_gauge_rows():
     assert len(df) == 1 and df.loc[0, "wlevel_06"] == 592
 
 
+def test_repo_paths_are_derived_from_this_file_not_hardcoded():
+    """SFINCS_BIN/RUN_SFINCS_SH must sit inside the checkout that holds common.py.
+
+    Regression guard: both were hardcoded to ~/SFINCS/... and broke when the
+    checkout was renamed to ~/sfincs, which also took data_catalog.yml's root
+    with it and made the model unbuildable.
+    """
+    assert common.REPO == common.ROOT.parent
+    for p in (common.SFINCS_BIN, common.RUN_SFINCS_SH):
+        assert common.REPO in p.parents, p
+
+
 @pytest.mark.integration
 def test_raw_inputs_exist():
     for p in (common.DEM_5M, common.EMODNET, common.ISOBATHS, common.DB, common.ERA5_2013, common.SFINCS_BIN):

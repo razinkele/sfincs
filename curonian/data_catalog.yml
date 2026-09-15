@@ -1,7 +1,8 @@
 # HydroMT 0.10 data catalogue for the Curonian Lagoon SFINCS model.
-# Paths are absolute on this machine; raw sources are read-only.
+# Raw sources are absolute on this machine and read-only; the project's own inputs are
+# relative to this file (root: .), so the checkout can be renamed or cloned anywhere.
 meta:
-  root: /home/razinka/SFINCS/curonian
+  root: .
   version: 2026-09-04
 
 dem_5m:

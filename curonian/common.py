@@ -14,6 +14,8 @@ import pandas as pd
 from pyproj import Transformer
 
 ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parent          # the SFINCS checkout; derived, never hardcoded (the
+                           # directory was renamed SFINCS -> sfincs once already)
 INPUTS = ROOT / "inputs"
 RUNS = ROOT / "runs"
 RUN_XAVER = RUNS / "xaver_2013"
@@ -25,8 +27,8 @@ ISOBATHS = HOME / "curonian/isobates.gpkg"
 ISOBATH_LAYER = "depth_isobates__isobates__depths"
 DB = HOME / "curonian/curonian_db.gpkg"
 ERA5_2013 = HOME / "eutropy/era5_raw/era5_wind_nida_2013.nc"
-SFINCS_BIN = HOME / "SFINCS/sfincs-linux/bin/sfincs"
-RUN_SFINCS_SH = HOME / "SFINCS/run_sfincs.sh"
+SFINCS_BIN = REPO / "sfincs-linux/bin/sfincs"
+RUN_SFINCS_SH = REPO / "run_sfincs.sh"
 
 CRS = 3346  # LKS-94 / Lithuania TM
 X0, Y0 = 270_000.0, 6_080_000.0

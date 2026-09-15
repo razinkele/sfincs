@@ -4,6 +4,12 @@
 **Engine:** SFINCS v2.4.0 Galibier, Linux build at `~/SFINCS/sfincs-linux/bin/sfincs`
 **Builder:** hydromt_sfincs 1.2.2 on hydromt 0.10.1, env `hydromt-sfincs`
 
+> **Note (2026-09-15):** the checkout has since been renamed `~/SFINCS` → `~/sfincs`.
+> Paths written `~/SFINCS/...` below are historical; the code no longer hardcodes
+> them (`common.REPO` is derived from the file's own location, and
+> `data_catalog.yml` uses `root: .`). See the resolution sweep in
+> `../plans/2026-09-04-curonian-lagoon-xaver-model-followups.md`.
+
 ## 1. Purpose
 
 First version of a compound-flood model of the Curonian Lagoon whose target is

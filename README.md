@@ -21,25 +21,25 @@ upstream source tag `v2.4.0_Galibier_release` (GNU GPL-3.0).
 
 ```bash
 # from anywhere: run the model in a directory, using 8 threads
-~/SFINCS/run_sfincs.sh /path/to/model 8
+~/sfincs/run_sfincs.sh /path/to/model 8
 
 # or call the binary directly from inside the model directory
-cd /path/to/model && OMP_NUM_THREADS=8 ~/SFINCS/sfincs-linux/bin/sfincs
+cd /path/to/model && OMP_NUM_THREADS=8 ~/sfincs/sfincs-linux/bin/sfincs
 ```
 
 SFINCS reads `sfincs.inp` from the current directory and writes
 `sfincs_map.nc`, `sfincs_his.nc`, and `sfincs.log` next to it.
-To put `sfincs` on your PATH, add `export PATH="$HOME/SFINCS/sfincs-linux/bin:$PATH"` to `~/.bashrc`.
+To put `sfincs` on your PATH, add `export PATH="$HOME/sfincs/sfincs-linux/bin:$PATH"` to `~/.bashrc`.
 
 ## Rebuilding
 
 ```bash
-cd ~/SFINCS/sfincs-src/source
+cd ~/sfincs/sfincs-src/source
 autoreconf -vif
 ./configure FC=gfortran \
   FCFLAGS="-fopenmp -O3 -fallow-argument-mismatch -w" \
   FFLAGS="-fopenmp -O3 -fallow-argument-mismatch -w" \
-  --disable-openacc --disable-shared --prefix="$HOME/SFINCS/sfincs-linux"
+  --disable-openacc --disable-shared --prefix="$HOME/sfincs/sfincs-linux"
 make            # serial on purpose: the Makefile does not declare Fortran module deps, so -j breaks
 make install
 ```
