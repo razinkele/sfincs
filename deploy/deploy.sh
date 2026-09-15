@@ -165,6 +165,7 @@ mkdir -p "$APP_DIR"
 # it makes line numbers drift (see osmose-src/deploy.sh for the failure mode).
 rsync -a --delete \
     --exclude '__pycache__/' --exclude '*.pyc' --exclude '.pytest_cache/' \
+    --exclude 'test_*.py' \
     "${SRC_DIR}/" "${APP_DIR}/"
 
 # Shiny Server starts the app without inheriting this shell's environment, so
@@ -179,13 +180,20 @@ app_dir, data_dir = pathlib.Path(sys.argv[1]), sys.argv[2]
     f'os.environ.setdefault("SFINCS_DATA_DIR", {data_dir!r})\n'
 )
 PY
+
+# Shiny Server restarts an app when this file's mtime changes.  Without it a
+# re-deploy would rsync new code underneath a process that keeps running the
+# old one — `systemctl reload` re-reads config but does not cycle app
+# processes.  Must come after the rsync, whose --delete would remove it.
+touch "${APP_DIR}/restart.txt"
+
 chown -R root:shiny "$APP_DIR"
 chmod -R u=rwX,g=rX,o=rX "$APP_DIR"
 info "code installed ($(find "$APP_DIR" -name '*.py' | wc -l) python files)"
 
 if $CODE_ONLY; then
     systemctl reload shiny-server
-    info "Code updated and shiny-server reloaded. ${PUBLIC_URL}"
+    info "Code updated, app restarted. ${PUBLIC_URL}"
     exit 0
 fi
 
@@ -257,6 +265,26 @@ fi
 curl -sk "$PUBLIC_URL" | grep -qi "SFINCS" \
     || fail "page served but does not look like the SFINCS app"
 info "HTTP 200 and page content verified"
+
+# Fetch one published figure through the proxy.  This single request proves
+# two things reasoning alone cannot: that the /sfincs prefix is stripped
+# correctly on the way to the app, and that user 'shiny' can actually read
+# the model tree (the figure is streamed from SFINCS_DATA_DIR at request
+# time, not bundled with the code).
+FIRST_VARIANT="$(ls "${SFINCS_DATA_DIR}/results" 2>/dev/null | head -1 || true)"
+if [[ -n "$FIRST_VARIANT" ]]; then
+    FIG_URL="${PUBLIC_URL}figures/${FIRST_VARIANT}/validation_timeseries.png"
+    read -r FIG_CODE FIG_SIZE < <(curl -sk -o /dev/null -w '%{http_code} %{size_download}' "$FIG_URL" || echo "000 0")
+    if [[ "$FIG_CODE" == "200" && "${FIG_SIZE:-0}" -gt 0 ]]; then
+        info "figure route verified (${FIG_SIZE} bytes from ${FIRST_VARIANT})"
+    else
+        warn "figure request returned HTTP ${FIG_CODE}, ${FIG_SIZE} bytes"
+        warn "  the page works, but figures will be blank — check that user"
+        warn "  'shiny' can read ${SFINCS_DATA_DIR}/results"
+    fi
+else
+    warn "no run directories under ${SFINCS_DATA_DIR}/results — skipping figure check"
+fi
 
 # --- toolbox catalogue ----------------------------------------------------
 cp -a "$SERVICES_JSON" "${SERVICES_JSON}.bak-${STAMP}"
