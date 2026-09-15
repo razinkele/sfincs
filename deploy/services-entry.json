@@ -1,0 +1,13 @@
+{
+  "id": "sfincs",
+  "title": "SFINCS",
+  "path": "/sfincs/",
+  "description": "Super-Fast INundation of CoastS — compound flood model for the Curonian Lagoon and Nemunas delta. Browse validated storm runs, success criteria, station water levels and inundation extents.",
+  "icon": "model",
+  "tag": "Shiny",
+  "tagClass": "shiny",
+  "language": "Python",
+  "visible": false,
+  "order": 13,
+  "svg": "<svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M3 12l4-5 4 4 3-3 7 6\"/><path d=\"M2 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0\"/><path d=\"M2 21c2-2 4-2 6 0s4 2 6 0 4-2 6 0\"/></svg>"
+}
