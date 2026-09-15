@@ -1,8 +1,27 @@
-# SFINCS 2026.01 (v2.4.0 Galibier) on Linux
+# SFINCS on Linux, and the Curonian Lagoon model built with it
 
-Deltares ships only a Windows executable in `SFINCS_2026_01_release.zip`.
-This folder holds a native Linux build of the same release, compiled from the
-upstream source tag `v2.4.0_Galibier_release` (GNU GPL-3.0).
+Two things live here:
+
+- **A native Linux build of SFINCS 2026.01 (v2.4.0 Galibier)** — Deltares ships
+  only a Windows executable, so this is compiled from the upstream source tag
+  `v2.4.0_Galibier_release` (GNU GPL-3.0), plus the `hydromt-sfincs` environment
+  used to build models. Everything below documents that.
+- **[`curonian/`](curonian/README.md) — a whole-lagoon compound-flood model of the
+  Curonian Lagoon (Lithuania)**, hindcasting Storm Xaver, 28 Nov – 11 Dec 2013.
+  Validated against four gauges in three forcing variants; all four success
+  criteria met. That directory has its own README with the build and run
+  commands, the results tables and the findings.
+
+## What a clone does not contain
+
+The SFINCS executable, its source checkout and the release zip are git-ignored,
+as are the models' run directories and large derived inputs — so a clone is
+small and carries no Deltares binary. `SFINCS_2026_01_release.zip` must be
+obtained from Deltares (its licence terms are in this repo), the binary rebuilt
+per **Rebuilding** below, and the model's derived inputs regenerated per
+`curonian/README.md`. The raw data sources the Curonian model reads are
+absolute paths in `curonian/data_catalog.yml`, specific to the machine this was
+built on; a different machine needs those four sources and an edit there.
 
 ## Layout
 
@@ -99,8 +118,8 @@ a separate env. Docs: https://deltares.github.io/hydromt_sfincs/
 
 ## Models built on this SFINCS build
 
-`curonian/` is a whole-lagoon compound-flood model of the Curonian Lagoon
-(Lithuania), first hindcast Storm Xaver (28 Nov–11 Dec 2013), built with the
-`hydromt-sfincs` environment above and run with this folder's Linux `sfincs`
-binary. See `curonian/README.md` for build/run commands and validation
-results.
+`curonian/` (see the top of this file) is built with the `hydromt-sfincs`
+environment above and run with this folder's Linux `sfincs` binary via
+`run_sfincs.sh`. Its design, plan and follow-up records are in
+`docs/superpowers/`. Full build and run commands, the validation tables and the
+findings are in [`curonian/README.md`](curonian/README.md).
