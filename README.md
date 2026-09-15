@@ -116,6 +116,73 @@ hydromt_sfincs 2.0.0 (component-based API, `sf.grid.create()` etc.) exists only 
 release candidate on PyPI as of September 2026; it needs hydromt >= 1.3 and would go in
 a separate env. Docs: https://deltares.github.io/hydromt_sfincs/
 
+## Citation
+
+If you use this repository, please cite the software and data it is built on.
+Every reference below was verified against its published record; the two marked
+"no paper" are software/data and take a software or dataset citation, not a
+literature one.
+
+**This repository**
+
+> Razinkovas-Baziukas, A. (2026). *Curonian Lagoon SFINCS model: Storm Xaver
+> 2013 hindcast* [Software]. https://github.com/razinkele/sfincs
+
+For a citable, versioned snapshot, mint a DOI by linking the repository to
+Zenodo and cutting a release; add the DOI here when you do.
+
+**Model engine**
+
+> Leijnse, T., van Ormondt, M., Nederhoff, K., & van Dongeren, A. (2021).
+> Modeling compound flooding in coastal systems using a computationally
+> efficient reduced-physics solver: Including fluvial, pluvial, tidal, wind- and
+> wave-driven processes. *Coastal Engineering*, 163, 103796.
+> https://doi.org/10.1016/j.coastaleng.2020.103796
+
+**Model builder**
+
+> Eilander, D., Boisgontier, H., Bouaziz, L., Buitink, J., Couasnon, A.,
+> Dalmijn, B., Hegnauer, M., de Jong, T., Loos, S., Marth, I., & van Verseveld,
+> W. (2023). HydroMT: Automated and reproducible model building and analysis.
+> *The Journal of Open Source Software*, 8(83), 4897.
+> https://doi.org/10.21105/joss.04897
+
+The `hydromt_sfincs` plugin (v1.2.2 here) has **no paper of its own** — it is
+documented within the HydroMT reference above. Cite it as software:
+https://github.com/Deltares/hydromt_sfincs
+
+**Forcing data**
+
+> Hersbach, H., Bell, B., Berrisford, P., Hirahara, S., Horányi, A.,
+> Muñoz-Sabater, J., … Thépaut, J.-N. (2020). The ERA5 global reanalysis.
+> *Quarterly Journal of the Royal Meteorological Society*, 146(730), 1999–2049.
+> https://doi.org/10.1002/qj.3803
+
+> Muis, S., Irazoqui Apecechea, M., Dullaart, J., de Lima Rego, J., Madsen,
+> K. S., Su, J., Yan, K., & Verlaan, M. (2020). A high-resolution global dataset
+> of extreme sea levels, tides, and storm surges, including future projections.
+> *Frontiers in Marine Science*, 7, 263.
+> https://doi.org/10.3389/fmars.2020.00263
+
+Muis et al. describe GTSM v3.0, the model behind the sea-boundary series used
+here. The series itself was downloaded from the Copernicus Climate Data Store
+(`sis-water-level-change-timeseries-cmip6`, reanalysis experiment, v3) — cite
+that CDS entry alongside the paper, since the dataset and the model description
+are not the same artefact.
+
+**Bathymetry, topography and gauges**
+
+EMODnet Bathymetry has **no paper**; it is cited as a dataset, conventionally as
+"EMODnet Bathymetry Consortium (2018)". Take the exact DOI and product version
+from your own download rather than copying one — the DTM is reissued
+periodically and the version matters.
+
+Gauge water levels and river discharge come from the Lithuanian
+Hydrometeorological Service (LHMT), whose open data is CC BY-SA 4.0 and
+**requires attribution**. Channel centrelines come from OpenStreetMap
+contributors, ODbL. The 5 m DEM of the lower Nemunas is a third-party dataset
+held locally (see `curonian/data_catalog.yml`) and is not redistributed here.
+
 ## Models built on this SFINCS build
 
 `curonian/` (see the top of this file) is built with the `hydromt-sfincs`
