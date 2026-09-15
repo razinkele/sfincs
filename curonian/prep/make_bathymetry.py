@@ -64,11 +64,24 @@ def make_bathymetry(res: float = 50.0, out: Path = common.INPUTS / "lagoon_bathy
     yc = miny + nrow * res - res * (np.arange(nrow) + 0.5)      # north to south
     gx, gy = np.meshgrid(xc, yc)
 
+    # Build the lagoon mask BEFORE interpolating and evaluate the interpolators only on
+    # the cells that survive it. The result is identical -- outside cells were computed
+    # and then thrown away by .where(inside) -- but the full 50 m bbox is ~2.8M cells
+    # against ~640k inside the lagoon, so this skips roughly three quarters of the work.
+    frame = xr.DataArray(np.full((nrow, ncol), np.nan, dtype="float32"), dims=("y", "x"),
+                         coords={"y": yc, "x": xc}, name="elevtn")
+    frame.raster.set_crs(common.CRS)
+    frame.raster.set_nodata(np.nan)
+    inside = frame.raster.geometry_mask(gpd.GeoDataFrame(geometry=[lagoon], crs=common.CRS))
+    inside_np = np.asarray(inside)
+
     lin = LinearNDInterpolator(xy, depth)
-    z = lin(gx, gy)
-    holes = np.isnan(z)
+    z = np.full(inside_np.shape, np.nan)
+    zi = lin(gx[inside_np], gy[inside_np])
+    holes = np.isnan(zi)
     if holes.any():
-        z[holes] = NearestNDInterpolator(xy, depth)(gx[holes], gy[holes])
+        zi[holes] = NearestNDInterpolator(xy, depth)(gx[inside_np][holes], gy[inside_np][holes])
+    z[inside_np] = zi
     # isobath_points() already dropped depths > 10 m (see its comment); clip here to the
     # same 10 m so the interpolator's overshoot at the edge of that filtered set can't
     # push a cell past what the retained isobaths actually support. The tif's minimum
@@ -78,7 +91,6 @@ def make_bathymetry(res: float = 50.0, out: Path = common.INPUTS / "lagoon_bathy
     da = xr.DataArray(elev.astype("float32"), dims=("y", "x"), coords={"y": yc, "x": xc}, name="elevtn")
     da.raster.set_crs(common.CRS)
     da.raster.set_nodata(np.nan)
-    inside = da.raster.geometry_mask(gpd.GeoDataFrame(geometry=[lagoon], crs=common.CRS))
     da = da.where(inside)
     assert float(da.count()) > 0.9 * lagoon.area / res**2, "lagoon coverage below 90 %"
     assert float(da.min()) >= -10.0 and float(da.max()) <= 0.0

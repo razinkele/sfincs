@@ -83,3 +83,33 @@ def test_main_writes_fallback_when_allow_fallback_true(tmp_path, monkeypatch):
     result = mc.main(out=out_path, allow_fallback=True)
     assert out_path.exists()
     assert result["source"].tolist() == ["fixed", "fallback", "fallback"]
+
+
+def test_merge_reports_discarded_segments(capsys):
+    """_merge silently drops all but the longest segment of a disjoint way; say so."""
+    far_apart = [LineString([(21.0, 55.0), (21.1, 55.0)]),      # the long one, kept
+                 LineString([(21.5, 55.5), (21.52, 55.5)])]     # disjoint, discarded
+    merged = mc._merge(far_apart)
+    assert merged.geom_type == "LineString"
+    assert "discard" in capsys.readouterr().out.lower()
+
+
+def test_merge_stays_quiet_when_ways_join_up(capsys):
+    joined = [LineString([(21.0, 55.0), (21.1, 55.0)]), LineString([(21.1, 55.0), (21.2, 55.0)])]
+    merged = mc._merge(joined)
+    assert merged.geom_type == "LineString" and capsys.readouterr().out == ""
+
+
+def test_build_channels_raises_valueerror_on_implausible_strait(monkeypatch):
+    """Runtime validation must survive `python -O`, which strips bare asserts."""
+    monkeypatch.setattr(mc, "STRAIT_LONLAT", [(21.15, 55.62), (21.1501, 55.6201)])   # ~13 m long
+    with pytest.raises(ValueError, match="strait"):
+        mc.build_channels(None)
+
+
+def test_main_lets_a_client_bug_propagate(tmp_path, monkeypatch):
+    """A TypeError in our own fetch code is a bug, not an Overpass outage: it must
+    not be swallowed into the fallback path, which would silently degrade the input."""
+    monkeypatch.setattr(mc, "fetch_osm_rivers", lambda: (_ for _ in ()).throw(TypeError("client bug")))
+    with pytest.raises(TypeError):
+        mc.main(out=tmp_path / "channels.geojson", allow_fallback=True)

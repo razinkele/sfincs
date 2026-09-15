@@ -25,6 +25,24 @@ DATASETS_DEP = [
 # GeoJSON attributes win over these defaults.
 DATASETS_RIV = [{"centerlines": "channels", "rivwth": 200, "rivbed": -4.0}]
 
+# check_model()'s two tuning numbers, named rather than buried as literals.
+# The probe is a point of permanently open water west of Ventė, in the middle of the
+# lagoon: check_model() asserts it shares a connected component with the harbour mouth,
+# which is how it detects a strait that failed to burn through. It must lie inside the
+# active region (tests/test_build_model.py checks that).
+OPEN_LAGOON_PROBE = (318_000.0, 6_130_000.0)
+# Boundary cells are flagged per 100 m grid cell while the ring is a smooth circle, so a
+# cell centre can sit up to ~half a diagonal (71 m) outside it; 150 m covers that with room.
+BND_RING_TOL_M = 150.0
+
+# Roughness. In subgrid mode SFINCS takes roughness from the subgrid tables
+# (sfincs_subgrid.nc: uv_navg spans manning_sea..manning_land), so the inp keywords are
+# inert -- but they are the first thing a reader checks, so they are written to match
+# rather than left at the SFINCS defaults.
+MANNING_LAND = 0.06
+MANNING_SEA = 0.02
+RGH_LEV_LAND = 0.3
+
 
 def _read_ts(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, index_col=0, parse_dates=True)
@@ -58,7 +76,8 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
     sf.setup_mask_bounds(btype="waterlevel", include_mask="boundary_ring", reset_bounds=True)
     if subgrid:
         sf.setup_subgrid(datasets_dep=DATASETS_DEP, datasets_riv=DATASETS_RIV, nr_subgrid_pixels=20, nlevels=10,
-                         manning_land=0.06, manning_sea=0.02, rgh_lev_land=0.3, write_dep_tif=True)
+                         manning_land=MANNING_LAND, manning_sea=MANNING_SEA, rgh_lev_land=RGH_LEV_LAND,
+                         write_dep_tif=True)
         # NOTE: hydromt_sfincs 1.2.2's setup_subgrid() always writes the modern NetCDF
         # subgrid table (sbgfile = sfincs_subgrid.nc), not the legacy binary sfincs.sbg
         # the brief names. Forcing the .sbg extension crashes: the new subgrid table
@@ -67,13 +86,17 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
         # z_depth/u_hrep/u_navg field names -> AttributeError. Accept the NetCDF
         # default; see tests/test_build_model.py for the corresponding check.
     else:
-        sf.setup_manning_roughness(manning_land=0.06, manning_sea=0.02, rgh_lev_land=0.3)
+        sf.setup_manning_roughness(manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
+                                   rgh_lev_land=RGH_LEV_LAND)
 
     sf.setup_config(
         tref=common.TREF.strftime("%Y%m%d %H%M%S"), tstart=common.TREF.strftime("%Y%m%d %H%M%S"),
         tstop=common.TSTOP.strftime("%Y%m%d %H%M%S"),
         advection=1, alpha=0.5, huthresh=0.05, viscosity=1,
         dtout=3600, dthisout=600, dtmaxout=99999999,
+        # Inert under a subgrid (see MANNING_LAND); written so sfincs.inp reports the
+        # same roughness the subgrid tables were built with instead of SFINCS' 0.04.
+        manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
     )
     bzs = _read_ts(inputs / "bzs.csv")
     sf.setup_config(zsini=float(bzs.iloc[0].mean()))
@@ -116,10 +139,11 @@ def check_model(run_dir: Path = common.RUN_XAVER) -> dict:
     def label_at(px, py):
         return labels[int(np.argmin(abs(y - py))), int(np.argmin(abs(x - px)))]
     mx, my = common.lonlat_to_xy(*common.KLAIPEDA_MOUTH_LONLAT)
-    connected = label_at(mx, my) == label_at(318_000, 6_130_000) != 0   # mouth vs open lagoon
+    connected = label_at(mx, my) == label_at(*OPEN_LAGOON_PROBE) != 0   # mouth vs open lagoon
     ring = gpd.read_file(common.INPUTS / "boundary_ring.geojson").geometry.iloc[0]
     rows, cols = np.where(msk == 2)
-    bnd_in_ring = all(ring.buffer(150).contains(gpd.points_from_xy([x[c]], [y[r]])[0]) for r, c in zip(rows, cols))
+    bnd_in_ring = all(ring.buffer(BND_RING_TOL_M).contains(gpd.points_from_xy([x[c]], [y[r]])[0])
+                      for r, c in zip(rows, cols))
     return {"n_active": int(active.sum()), "n_bnd": int((msk == 2).sum()), "connected": bool(connected),
             "bnd_in_ring": bool(bnd_in_ring)}
 

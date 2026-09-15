@@ -203,3 +203,123 @@ def test_criteria_c3_klaipeda_not_met(synth_run_dir):
     obs["Klaipeda"] = pd.Series([v + 0.30 for v in model_vals], index=times)   # constant +0.30 m bias
     crit = va.criteria(his, obs, synth_run_dir, window=SYNTH_WINDOW)
     assert _verdict(crit, "C3") == "not met"
+
+
+def _write_south_up_run(tmp_path, north_is_land=True):
+    """A run dir whose dep_subgrid.tif is south-up and varies by ROW, not column."""
+    import netCDF4 as nc
+    import rasterio
+
+    subgrid_dir = tmp_path / "subgrid"
+    subgrid_dir.mkdir()
+    ground = np.full((40, 40), -1.0, dtype="float32")
+    # South-up storage: row 0 is the SOUTH edge, row 39 the north. Put land in the north.
+    ground[20:, :] = 1.0 if north_is_land else -1.0
+    if not north_is_land:
+        ground[:20, :] = 1.0
+    transform = rasterio.Affine(5.0, 0.0, 0.0, 0.0, 5.0, 0.0)      # e > 0 => south-up
+    with rasterio.open(subgrid_dir / "dep_subgrid.tif", "w", driver="GTiff", height=40, width=40,
+                        count=1, dtype="float32", crs="EPSG:3346", transform=transform) as dst:
+        dst.write(ground, 1)
+
+    with nc.Dataset(tmp_path / "sfincs_map.nc", "w") as d:
+        d.createDimension("n", 2); d.createDimension("m", 2); d.createDimension("timemax", 1)
+        x = d.createVariable("x", "f4", ("n", "m")); y = d.createVariable("y", "f4", ("n", "m"))
+        zb = d.createVariable("zb", "f4", ("n", "m")); zsmax = d.createVariable("zsmax", "f4", ("timemax", "n", "m"))
+        x[:] = [[50.0, 150.0], [50.0, 150.0]]
+        y[:] = [[50.0, 50.0], [150.0, 150.0]]
+        zb[:] = 0.0
+        zsmax[:] = 1.5
+    return tmp_path
+
+
+def test_flood_arrays_returns_north_up_rows_from_a_south_up_raster(tmp_path):
+    """Catches a row flip, which flood_map()'s area total cannot see.
+
+    The old south-up test varied ground by column only, so reversing the rows left
+    the flooded area identical and the assertion passed either way. Assert the
+    orientation itself: gy must descend and row 0 must be the northern land strip.
+    """
+    run = _write_south_up_run(tmp_path, north_is_land=True)
+    ground, flooded, depth, gx, gy, cell_km2 = va._flood_arrays(run, window=(0, 0, 200, 200))
+
+    assert gy[0] > gy[-1], "gy must run north -> south after normalisation"
+    assert np.all(np.diff(gy) < 0)
+    assert ground[0, :].mean() > 0, "row 0 must be the northern (land) half"
+    assert ground[-1, :].mean() < 0, "last row must be the southern (sea) half"
+
+
+def test_flood_arrays_row_orientation_matches_the_zb_fallback(tmp_path):
+    """The no-dep_subgrid.tif branch must normalise orientation the same way."""
+    import netCDF4 as nc
+
+    with nc.Dataset(tmp_path / "sfincs_map.nc", "w") as d:
+        d.createDimension("n", 2); d.createDimension("m", 2); d.createDimension("timemax", 1)
+        x = d.createVariable("x", "f4", ("n", "m")); y = d.createVariable("y", "f4", ("n", "m"))
+        zb = d.createVariable("zb", "f4", ("n", "m")); zsmax = d.createVariable("zsmax", "f4", ("timemax", "n", "m"))
+        x[:] = [[50.0, 150.0], [50.0, 150.0]]
+        y[:] = [[50.0, 50.0], [150.0, 150.0]]      # ascending with row index (south-up)
+        zb[:] = [[-1.0, -1.0], [1.0, 1.0]]         # north row (index 1) is land
+        zsmax[:] = 1.5
+
+    ground, flooded, depth, gx, gy, cell_km2 = va._flood_arrays(tmp_path, window=(0, 0, 200, 200))
+    assert gy[0] > gy[-1]
+    assert ground[0, :].mean() > 0, "row 0 must be the northern (land) row"
+
+
+def test_criteria_c1_not_met_when_peak_height_is_right_but_timing_is_not(synth_run_dir):
+    """The |dt| > 6 h half of C1 had no test: only the peak-height branch was covered."""
+    his = _base_his()
+    his.loc["2013-12-08 18:00", "Uostadvaris"] = 1.00      # right height, 60 h late
+    obs = _base_obs()
+    obs["Uostadvaris"].loc[pd.Timestamp("2013-12-06 06:00")] = 0.92
+    crit = va.criteria(his, obs, synth_run_dir, window=SYNTH_WINDOW)
+    c1 = next(c for c in crit if c["name"].startswith("C1"))
+    assert "+0.08" in c1["value"], "peak height must be inside +/-0.15 m for this to test timing"
+    assert c1["verdict"] == "not met"
+
+
+def test_c4_verdict_is_not_applicable_when_the_window_has_no_uplands():
+    """0/0 makes frac_pct NaN, and `NaN < 1.0` is False -- which used to read "not met",
+    i.e. a model failure, for a window that simply had nothing to measure."""
+    assert va.c4_verdict(float("nan"), 0) == "n/a"
+    assert va.c4_verdict(0.0, 0) == "n/a"
+
+
+def test_c4_verdict_still_scores_a_window_that_has_uplands():
+    assert va.c4_verdict(0.0, 5000) == "met"
+    assert va.c4_verdict(0.99, 5000) == "met"
+    assert va.c4_verdict(1.0, 5000) == "not met"
+    assert va.c4_verdict(37.5, 5000) == "not met"
+
+
+@pytest.fixture
+def lowland_run_dir(tmp_path):
+    """Like synth_run_dir but every pixel is below the C4 3 m cutoff: no uplands at all."""
+    import netCDF4 as nc
+    import rasterio
+
+    subgrid_dir = tmp_path / "subgrid"
+    subgrid_dir.mkdir()
+    ground = np.full((40, 40), 0.5, dtype="float32")              # land, but nowhere near 3 m
+    transform = rasterio.Affine(5.0, 0.0, 0.0, 0.0, -5.0, 200.0)
+    with rasterio.open(subgrid_dir / "dep_subgrid.tif", "w", driver="GTiff", height=40, width=40,
+                        count=1, dtype="float32", crs="EPSG:3346", transform=transform) as dst:
+        dst.write(ground, 1)
+
+    with nc.Dataset(tmp_path / "sfincs_map.nc", "w") as d:
+        d.createDimension("n", 2); d.createDimension("m", 2); d.createDimension("timemax", 1)
+        x = d.createVariable("x", "f4", ("n", "m")); y = d.createVariable("y", "f4", ("n", "m"))
+        zb = d.createVariable("zb", "f4", ("n", "m")); zsmax = d.createVariable("zsmax", "f4", ("timemax", "n", "m"))
+        x[:] = [[50.0, 150.0], [50.0, 150.0]]
+        y[:] = [[50.0, 50.0], [150.0, 150.0]]
+        zb[:] = 0.0
+        zsmax[:] = 0.5
+    return tmp_path
+
+
+def test_criteria_c4_reports_na_on_a_window_without_uplands(lowland_run_dir):
+    crit = va.criteria(_base_his(), _base_obs(), lowland_run_dir, window=SYNTH_WINDOW)
+    c4 = next(c for c in crit if c["name"].startswith("C4"))
+    assert c4["verdict"] == "n/a"
+    assert "no land above 3 m" in c4["value"]

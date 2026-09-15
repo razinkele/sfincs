@@ -18,26 +18,48 @@ STATIONS_LONLAT = {
 }
 DELTA_BOX = (325_000, 6_100_000, 370_000, 6_150_000)   # Šilutė / Rusnė / Russian lowlands
 
+# One radius, two users: the seaward disc active_region() adds at the harbour mouth and
+# the outer edge of boundary_ring(). They must coincide -- the waterlevel boundary cells
+# live in the ring and have to fall inside the active mask. Read at call time (not bound
+# as a default argument) so that changing it here really does move both.
+MOUTH_R_OUT = 2600.0
+MOUTH_R_IN = 2000.0     # inner edge of the ring; the annulus is MOUTH_R_IN..MOUTH_R_OUT
+
 
 def domain_box() -> Polygon:
+    """The full model grid footprint, from the origin and cell counts in common."""
     return box(common.X0, common.Y0, common.X0 + common.MMAX * common.DX, common.Y0 + common.NMAX * common.DY)
 
 
 def mouth_xy() -> tuple[float, float]:
+    """Projected coordinates of the Klaipėda harbour mouth, the model's sea entrance."""
     return common.lonlat_to_xy(*common.KLAIPEDA_MOUTH_LONLAT)
 
 
-def active_region(lagoon: Polygon, strait_line: LineString, mouth_radius: float = 2600.0) -> Polygon:
+def active_region(lagoon: Polygon, strait_line: LineString, mouth_radius: float | None = None) -> Polygon:
+    """Cells SFINCS may wet: the lagoon, the delta box, the strait and the mouth disc.
+
+    Returns the largest connected part, so an isolated sliver cannot become a second
+    basin. `mouth_radius` defaults to MOUTH_R_OUT, matching boundary_ring()'s outer edge.
+    """
     mx, my = mouth_xy()
-    parts = [lagoon.buffer(2000.0), box(*DELTA_BOX), strait_line.buffer(1500.0), Point(mx, my).buffer(mouth_radius)]
+    r_mouth = MOUTH_R_OUT if mouth_radius is None else mouth_radius
+    parts = [lagoon.buffer(2000.0), box(*DELTA_BOX), strait_line.buffer(1500.0), Point(mx, my).buffer(r_mouth)]
     reg = unary_union(parts).intersection(domain_box())
     if reg.geom_type == "MultiPolygon":
         reg = max(reg.geoms, key=lambda g: g.area)
     return reg.buffer(0)
 
 
-def boundary_ring(r_in: float = 2000.0, r_out: float = 2600.0) -> Polygon:
+def boundary_ring(r_in: float | None = None, r_out: float | None = None) -> Polygon:
+    """Annulus at the mouth holding the waterlevel boundary cells (msk == 2).
+
+    Its outer edge is MOUTH_R_OUT, the same radius active_region() uses for its mouth
+    disc, so every boundary cell falls inside the active mask.
+    """
     mx, my = mouth_xy()
+    r_in = MOUTH_R_IN if r_in is None else r_in
+    r_out = MOUTH_R_OUT if r_out is None else r_out
     return Point(mx, my).buffer(r_out).difference(Point(mx, my).buffer(r_in))
 
 
@@ -50,21 +72,23 @@ def boundary_points(n: int = 7, r: float = 2300.0) -> gpd.GeoDataFrame:
 
 
 def stations() -> gpd.GeoDataFrame:
+    """The nine observation points SFINCS writes to sfincs_his.nc, in STATIONS_LONLAT order."""
     rows = [{"name": k, "geometry": Point(*common.lonlat_to_xy(lon, lat))} for k, (lon, lat) in STATIONS_LONLAT.items()]
     return gpd.GeoDataFrame(rows, crs=common.CRS)
 
 
 def main(inputs=common.INPUTS) -> None:
+    """Write active_region, boundary_ring, boundary_points and stations to `inputs`."""
     lagoon = lagoon_polygon()
     channels = gpd.read_file(inputs / "channels.geojson").set_index("name")
     reg = active_region(lagoon, channels.loc["strait", "geometry"])
     ring = boundary_ring()
     assert domain_box().contains(reg) and domain_box().contains(ring)
     assert reg.intersects(ring), "boundary ring must touch the active region"
-    gpd.GeoDataFrame(geometry=[reg], crs=common.CRS).to_file(inputs / "active_region.geojson", driver="GeoJSON")
-    gpd.GeoDataFrame(geometry=[ring], crs=common.CRS).to_file(inputs / "boundary_ring.geojson", driver="GeoJSON")
-    boundary_points().to_file(inputs / "boundary_points.geojson", driver="GeoJSON")
-    stations().to_file(inputs / "stations.geojson", driver="GeoJSON")
+    common.write_geojson(gpd.GeoDataFrame(geometry=[reg], crs=common.CRS), inputs / "active_region.geojson")
+    common.write_geojson(gpd.GeoDataFrame(geometry=[ring], crs=common.CRS), inputs / "boundary_ring.geojson")
+    common.write_geojson(boundary_points(), inputs / "boundary_points.geojson")
+    common.write_geojson(stations(), inputs / "stations.geojson")
     print(f"active region {reg.area/1e6:.0f} km2; wrote 4 GeoJSON files to {inputs}")
 
 

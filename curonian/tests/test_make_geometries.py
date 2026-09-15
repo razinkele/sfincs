@@ -41,3 +41,24 @@ def test_stations_have_nine_named_points_inside_domain():
     st = mg.stations()
     assert len(st) == 9 and st["name"].is_unique
     assert st.geometry.within(mg.domain_box()).all()
+
+
+def test_mouth_disc_and_ring_outer_edge_follow_one_constant(monkeypatch):
+    """active_region's mouth disc and boundary_ring's outer edge must stay the same size.
+
+    They were two independent 2600.0 literals. If one is edited and the other is not,
+    the ring stops coinciding with the active region's seaward edge and boundary cells
+    can land outside the active mask -- a failure main()'s own assert would not catch,
+    because the ring would still *intersect* the region.
+    """
+    monkeypatch.setattr(mg, "MOUTH_R_OUT", 3000.0)
+    mx, my = mg.mouth_xy()
+    mouth = mg.Point(mx, my)
+
+    ring_outer = max(mouth.distance(mg.Point(c)) for c in mg.boundary_ring().exterior.coords)
+    lagoon = Polygon([(280_000, 6_090_000), (350_000, 6_090_000), (350_000, 6_170_000), (280_000, 6_170_000)])
+    strait = LineString([(320_000, 6_168_000), (318_000, 6_180_000)])
+    reg = mg.active_region(lagoon, strait)
+
+    assert abs(ring_outer - 3000.0) < 1.0
+    assert reg.contains(mg.Point(mx - 2900, my)), "mouth disc did not grow with the constant"

@@ -2,8 +2,9 @@
 "type": "FeatureCollection",
 "name": "dis_points",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::3346" } },
+"xy_coordinate_resolution": 0.001,
 "features": [
-{ "type": "Feature", "properties": { "index": 1, "name": "Nemunas_Rusne" }, "geometry": { "type": "Point", "coordinates": [ 333642.343027982860804, 6132530.057857944630086 ] } },
-{ "type": "Feature", "properties": { "index": 2, "name": "Minija_mouth" }, "geometry": { "type": "Point", "coordinates": [ 325917.772009017877281, 6146199.731752478517592 ] } }
+{ "type": "Feature", "properties": { "index": 1, "name": "Nemunas_Rusne" }, "geometry": { "type": "Point", "coordinates": [ 333642.343, 6132530.058 ] } },
+{ "type": "Feature", "properties": { "index": 2, "name": "Minija_mouth" }, "geometry": { "type": "Point", "coordinates": [ 325917.772, 6146199.732 ] } }
 ]
 }

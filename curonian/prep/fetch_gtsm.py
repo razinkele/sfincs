@@ -68,11 +68,18 @@ def series_from_files(files: list[Path], lonlat=common.KLAIPEDA_MOUTH_LONLAT):
             s = ds[var].isel({ds[var].dims[-1]: i}).to_series() if ds[var].dims[-1] != "time" \
                 else ds[var].isel({ds[var].dims[0]: i}).to_series()
             parts.append(s)
-    series = pd.concat(parts).sort_index()
+    # kind="stable" so that the month files' overlap resolves the same way every run:
+    # parts are concatenated in sorted-filename order, a stable sort preserves that
+    # order within equal timestamps, and duplicated() then keeps the earlier file's
+    # value. The default quicksort leaves the winner to numpy's partitioning.
+    series = pd.concat(parts).sort_index(kind="stable")
     series = series[~series.index.duplicated()].astype(float)
     series.index = pd.DatetimeIndex(series.index).tz_localize(None)
     series = series.asfreq("h")
-    assert series.notna().all(), "gaps in GTSM series"
+    if not series.notna().all():
+        missing = series.index[series.isna()]
+        raise ValueError(f"gaps in GTSM series: {len(missing)} missing hours, "
+                         f"first {missing[0]}, last {missing[-1]}")
     series.name = "waterlevel_m"
     return series, meta
 
@@ -89,8 +96,10 @@ def extract_nearest(zip_path: Path, lonlat=common.KLAIPEDA_MOUTH_LONLAT):
 def main(out: Path = common.INPUTS / "gtsm_klaipeda.csv") -> pd.Series:
     zip_path = download()
     series, meta = extract_nearest(zip_path)
-    assert meta["distance_km"] < 60, f"nearest GTSM station is {meta['distance_km']:.0f} km away"
-    series.to_csv(out, index_label="time")
+    if meta["distance_km"] >= 60:
+        raise ValueError(f"nearest GTSM station is {meta['distance_km']:.0f} km from the mouth "
+                         f"(limit 60 km): station {meta['station']} at {meta['lon']}, {meta['lat']}")
+    series.to_csv(out, index_label="time", float_format=common.CSV_FLOAT_FMT)
     print(f"wrote {out}: {series.index.min()} -> {series.index.max()}, station {meta}")
     return series
 

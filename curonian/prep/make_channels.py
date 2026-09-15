@@ -40,9 +40,20 @@ def to_3346(line_lonlat: LineString) -> LineString:
 
 
 def _merge(lines: list[LineString]) -> LineString:
+    """Join OSM ways into one centreline, keeping the longest part if they are disjoint.
+
+    Disjoint ways mean the name matched a river that OSM maps in several pieces (a
+    side branch, or a gap at a bridge). Keeping only the longest is the right call
+    for a centreline to burn in, but it is a real loss of geometry -- report it
+    rather than dropping it silently.
+    """
     merged = linemerge(unary_union(lines))
     if merged.geom_type == "MultiLineString":
-        merged = max(merged.geoms, key=lambda g: g.length)
+        parts = sorted(merged.geoms, key=lambda g: g.length, reverse=True)
+        merged = parts[0]
+        dropped = [round(g.length, 6) for g in parts[1:]]
+        print(f"_merge: ways are disjoint -- keeping the longest ({merged.length:.6f}) "
+              f"and discarding {len(dropped)} segment(s) of length {dropped}")
     return merged
 
 
@@ -69,8 +80,15 @@ def build_channels(osm: dict[str, LineString] | None) -> gpd.GeoDataFrame:
     rows = [{"name": k, "rivwth": CHANNELS[k][0], "rivbed": CHANNELS[k][1], "geometry": geoms[k]}
             for k in ("strait", "atmata", "skirvyte")]
     gdf = gpd.GeoDataFrame(rows, crs=common.CRS)
-    assert len(gdf) == 3 and gdf.geometry.is_valid.all()
-    assert 10_000 < gdf.set_index("name").loc["strait", "geometry"].length < 20_000
+    # Real exceptions, not bare asserts: these guard committed input geometry and
+    # must still fire under `python -O`, which strips assert statements entirely.
+    if len(gdf) != 3 or not gdf.geometry.is_valid.all():
+        raise ValueError(f"expected 3 valid channel geometries, got {len(gdf)}: "
+                         f"{dict(zip(gdf['name'], gdf.geometry.is_valid))}")
+    strait_len = gdf.set_index("name").loc["strait", "geometry"].length
+    if not 10_000 < strait_len < 20_000:
+        raise ValueError(f"strait centreline is {strait_len:.0f} m, outside the plausible "
+                         f"10-20 km range for the Klaipeda strait")
     return gdf
 
 
@@ -78,7 +96,11 @@ def main(out=common.INPUTS / "channels.geojson", allow_fallback: bool = False) -
     try:
         osm = fetch_osm_rivers()
         source = "osm"
-    except Exception as exc:  # network down or Overpass busy
+    except (requests.RequestException, RuntimeError) as exc:
+        # Deliberately narrow: RequestException covers every network/HTTP/JSON-decode
+        # failure and RuntimeError is fetch_osm_rivers' own "no ways returned". A bug
+        # in our client code (TypeError, KeyError, ...) must propagate instead of
+        # silently downgrading a committed input to fallback coordinates.
         # Check if existing file has OSM data
         if out.exists():
             try:
@@ -102,7 +124,7 @@ def main(out=common.INPUTS / "channels.geojson", allow_fallback: bool = False) -
     gdf = build_channels(osm)
     gdf["source"] = ["fixed", source, source]
     out.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_file(out, driver="GeoJSON")
+    common.write_geojson(gdf, out)
     print(f"wrote {out}\n{gdf[['name', 'rivwth', 'rivbed', 'source']]}\nlengths m: {gdf.geometry.length.round().tolist()}")
     return gdf
 

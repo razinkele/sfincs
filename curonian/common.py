@@ -8,6 +8,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -57,8 +58,36 @@ def lonlat_to_xy(lon: float, lat: float) -> tuple[float, float]:
     return float(x), float(y)
 
 
+def _db_uri(db: Path | None = None) -> str:
+    """Read-only sqlite URI for `db`, with the path percent-encoded.
+
+    quote() leaves "/" alone but escapes space, "?" and "#" -- unescaped, the last
+    two would be read as the URI's query and fragment delimiters and silently open
+    the wrong file. The current paths contain none of them; this keeps it that way.
+    """
+    return f"file:{quote(str(DB if db is None else db))}?mode=ro"
+
+
+# Millimetres in a projected CRS: far below the 100 m model grid and the 5 m DEM, so
+# nothing downstream can tell the difference, and the committed files stay diffable.
+GEOJSON_PRECISION = 3
+# Forcing CSVs: 3 decimals is a millimetre of water level, a mm/s of wind and a
+# thousandth of a m3/s -- all far below the accuracy of the sources. pandas otherwise
+# writes repr(float), e.g. a bias-corrected level as 0.3886666666666666.
+CSV_FLOAT_FMT = "%.3f"
+
+
+def write_geojson(gdf, path, precision: int = GEOJSON_PRECISION) -> None:
+    """Write `gdf` as GeoJSON with coordinates trimmed to `precision` decimals.
+
+    GDAL's COORDINATE_PRECISION layer option; without it every coordinate is written
+    at full float64 width (17 significant digits) and any regeneration produces a
+    large diff made entirely of noise.
+    """
+    gdf.to_file(path, driver="GeoJSON", COORDINATE_PRECISION=precision)
+
+
 def read_table(sql: str, params: tuple = ()) -> pd.DataFrame:
     """Run a read-only SQL query against the attribute tables of curonian_db.gpkg."""
-    uri = f"file:{DB}?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True)) as con:
+    with closing(sqlite3.connect(_db_uri(), uri=True)) as con:
         return pd.read_sql_query(sql, con, params=params)

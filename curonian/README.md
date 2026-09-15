@@ -260,8 +260,16 @@ fails and `--allow-fallback` is passed; keeps an existing OSM-derived file
 otherwise) and the CDS download in `prep.fetch_gtsm`.
 
 Git-ignored derived inputs that a clean checkout must regenerate before
-`build_model.py` will run: `inputs/lagoon_bathy_50m.tif` (`prep.make_bathymetry`)
-and the GTSM zip/CSV (`prep.fetch_gtsm`, needs `~/.cdsapirc`). Everything else
+`build_model.py` will run:
+
+- `inputs/lagoon_bathy_50m.tif` -- `prep.make_bathymetry` (`*.tif` is ignored)
+- `inputs/era5_grid_xaver.nc` and `inputs/era5_raw_2013_11_12.nc` --
+  `prep.fetch_era5_grid`, needed only for `--wind grid` (`*.nc` is ignored)
+
+`prep.fetch_gtsm`'s CDS download (`inputs/gtsm_2013_11_12.zip` and the directory
+it extracts to) is also ignored, but its *derived* product
+`inputs/gtsm_klaipeda.csv` is committed -- so a clean checkout does not need
+`~/.cdsapirc` unless the boundary is being rebuilt from scratch. Everything else
 under `inputs/` is committed.
 
 Build and run, from this folder inside the `hydromt-sfincs` env:

@@ -39,7 +39,10 @@ def bias_correct(model: pd.Series, obs: pd.Series, window) -> tuple[pd.Series, f
 def boundary_forcing(gtsm: pd.Series, npoints: int) -> pd.DataFrame:
     t = pd.date_range(common.TREF, common.TSTOP, freq="h")
     s = gtsm.reindex(t).interpolate(limit_direction="both")
-    assert s.notna().all()
+    if not s.notna().all():
+        raise ValueError(f"sea boundary has {int(s.isna().sum())} of {len(s)} steps still NaN after "
+                         f"interpolation; the source series covers {gtsm.index.min()}..{gtsm.index.max()}, "
+                         f"the run needs {common.TREF}..{common.TSTOP}")
     return pd.DataFrame({i: s.values for i in range(1, npoints + 1)}, index=t)
 
 
@@ -55,7 +58,11 @@ def wind_forcing(era5_path: Path = common.ERA5_2013) -> pd.DataFrame:
         u = d["u10"][:, 0, 0].astype(float); v = d["v10"][:, 0, 0].astype(float)
     df = wind_from_uv(t, u, v)
     df = df.loc[common.TREF - pd.Timedelta("1h"): common.TSTOP + pd.Timedelta("1h")]
-    assert df.notna().all().all() and df["mag"].max() > 15, "expected the Xaver gale in the wind series"
+    if not df.notna().all().all():
+        raise ValueError(f"wind series has NaN in {df.columns[df.isna().any()].tolist()}")
+    if df["mag"].max() <= 15:
+        raise ValueError(f"peak wind is only {df['mag'].max():.1f} m/s -- expected the Xaver gale "
+                         f"(>15 m/s) in {era5_path}")
     return df
 
 
@@ -76,7 +83,8 @@ def cmems_daily_boundary(path: Path = common.HOME / "curonian/shyfem_box/cmems_b
         sla = np.ma.filled(d["sla"][:, i, j], np.nan)
     daily = pd.Series(sla, index=t + pd.Timedelta(hours=12)).loc["2013-11-20":"2013-12-20"]   # daily means -> noon
     hourly = daily.resample("h").interpolate("linear")
-    assert hourly.notna().all(), "CMEMS sla has gaps near the mouth"
+    if not hourly.notna().all():
+        raise ValueError(f"CMEMS sla has {int(hourly.isna().sum())} gaps near the mouth")
     hourly.name = "waterlevel_m"
     return hourly
 
@@ -87,7 +95,9 @@ def discharge_forcing() -> pd.DataFrame:
         "AND date BETWEEN '2013-11-20' AND '2013-12-20' ORDER BY date")
     daily = pd.Series(df["discharge_m3s"].values, index=pd.to_datetime(df["date"]))
     nem = lag_and_resample(daily, common.NEMUNAS_LAG_DAYS, common.TREF, common.TSTOP)
-    assert nem.notna().all() and nem.index[0] == common.TREF and nem.index[-1] == common.TSTOP
+    if not nem.notna().all() or nem.index[0] != common.TREF or nem.index[-1] != common.TSTOP:
+        raise ValueError(f"Nemunas discharge does not cover the run period cleanly: "
+                         f"{nem.index[0]}..{nem.index[-1]} with {int(nem.isna().sum())} NaN")
     return pd.DataFrame({1: nem.values, 2: common.MINIJA_Q_DEC}, index=nem.index)
 
 
@@ -110,14 +120,14 @@ def main(inputs: Path = common.INPUTS, use_cmems: bool = False) -> None:
     corrected, offset = bias_correct(gtsm, klaipeda_06, common.CALM_WINDOW)
     bnd_pts = gpd.read_file(inputs / "boundary_points.geojson")
     bzs = boundary_forcing(corrected, len(bnd_pts))
-    bzs.to_csv(inputs / "bzs.csv", index_label="time")
+    bzs.to_csv(inputs / "bzs.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
 
     wind = wind_forcing()
-    wind.to_csv(inputs / "wind.csv", index_label="time")
+    wind.to_csv(inputs / "wind.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
 
     dis = discharge_forcing()
-    dis.to_csv(inputs / "dis.csv", index_label="time")
-    discharge_points().to_file(inputs / "dis_points.geojson", driver="GeoJSON")
+    dis.to_csv(inputs / "dis.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
+    common.write_geojson(discharge_points(), inputs / "dis_points.geojson")
 
     storm = corrected.loc["2013-12-05":"2013-12-08"]
     summary = (f"GTSM offset applied: {offset:+.3f} m (calm window {common.CALM_WINDOW[0].date()}..{common.CALM_WINDOW[1].date()})\n"

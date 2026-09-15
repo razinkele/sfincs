@@ -150,6 +150,24 @@ def _window_label(win) -> str:
     return f"{_fmt_dt(win[0])} to {_fmt_dt(win[1])}"
 
 
+def c4_verdict(frac_pct: float, n_upland_px: int) -> str:
+    """Verdict for C4 given the flooded fraction and how many upland pixels there were.
+
+    The <1 % rule is unambiguous whenever the window actually contains land above 3 m.
+    When it contains none, `frac_pct` is 0/0 = NaN and `NaN < 1.0` is False, so the
+    criterion currently reports "not met" -- reading as a model failure when in fact
+    nothing was measured. The delta window always has uplands, so this is unreachable
+    today; it is reachable for any other window someone passes in.
+
+    Ruling: report "n/a". A criterion with nothing to measure is neither passed nor
+    failed, and criteria() already carries a non-pass/fail verdict ("info"), so the
+    vocabulary stretches to it without a new concept.
+    """
+    if n_upland_px == 0:
+        return "n/a"
+    return "met" if frac_pct < 1.0 else "not met"
+
+
 def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XAVER,
              window=VALIDATION_WINDOW) -> list[dict]:
     """Spec section 9 success criteria, each as {name, window, value, threshold, verdict}."""
@@ -202,12 +220,14 @@ def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XA
     # C4: no spurious flooding of the Silute uplands.
     ground, flooded, _, _, _, _ = _flood_arrays(run_dir, window)
     uplands = np.isfinite(ground) & (ground > 3.0)
-    frac_pct = 100.0 * float(flooded[uplands].sum()) / float(uplands.sum())
+    n_upland_px = int(uplands.sum())
+    frac_pct = (100.0 * float(flooded[uplands].sum()) / n_upland_px) if n_upland_px else float("nan")
     out.append({
         "name": "C4 Silute uplands", "window": f"delta window {window}",
-        "value": f"{frac_pct:.2f}% of land with ground > 3 m flooded",
+        "value": (f"{frac_pct:.2f}% of land with ground > 3 m flooded" if n_upland_px
+                  else "no land above 3 m in this window, nothing to measure"),
         "threshold": "< 1 % flooded",
-        "verdict": "met" if frac_pct < 1.0 else "not met",
+        "verdict": c4_verdict(frac_pct, n_upland_px),
     })
 
     # Extra context, not itself a spec criterion: the 8 Dec 06:00 error at the two gauges

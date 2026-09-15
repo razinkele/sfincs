@@ -42,3 +42,16 @@ def test_make_bathymetry_writes_lagoon_grid(tmp_path):
         centre_x, centre_y = 318_000, 6_130_000   # open lagoon west of Ventė
         row, col = src.index(centre_x, centre_y)
         assert z[row, col] < -1.5
+
+
+@pytest.mark.integration
+def test_lagoon_polygon_returns_a_single_polygon_not_a_multipolygon():
+    """Everything downstream (.exterior, .interiors, .buffer) assumes a single Polygon.
+
+    The database layer is a MultiPolygon; lagoon_polygon() picks its largest part.
+    Only ever checked indirectly, via .area -- which a MultiPolygon also answers.
+    """
+    poly = mb.lagoon_polygon()
+    assert isinstance(poly, Polygon)
+    assert poly.geom_type == "Polygon"
+    assert poly.exterior is not None

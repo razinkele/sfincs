@@ -2,15 +2,16 @@
 "type": "FeatureCollection",
 "name": "stations",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::3346" } },
+"xy_coordinate_resolution": 0.001,
 "features": [
-{ "type": "Feature", "properties": { "name": "Klaipeda" }, "geometry": { "type": "Point", "coordinates": [ 317168.465127572009806, 6179433.511892329901457 ] } },
-{ "type": "Feature", "properties": { "name": "Juodkrante" }, "geometry": { "type": "Point", "coordinates": [ 317047.839279809617437, 6161048.295395233668387 ] } },
-{ "type": "Feature", "properties": { "name": "Nida" }, "geometry": { "type": "Point", "coordinates": [ 309947.494154820102267, 6133652.273599456995726 ] } },
-{ "type": "Feature", "properties": { "name": "Vente" }, "geometry": { "type": "Point", "coordinates": [ 321761.158719613216817, 6137450.67347963526845 ] } },
-{ "type": "Feature", "properties": { "name": "Uostadvaris" }, "geometry": { "type": "Point", "coordinates": [ 324887.677568567043636, 6136211.187707057222724 ] } },
-{ "type": "Feature", "properties": { "name": "Rusne" }, "geometry": { "type": "Point", "coordinates": [ 333052.12536136538256, 6132050.893383606337011 ] } },
-{ "type": "Feature", "properties": { "name": "Silute" }, "geometry": { "type": "Point", "coordinates": [ 340249.732573872432113, 6136653.882572749629617 ] } },
-{ "type": "Feature", "properties": { "name": "Atmata_mouth" }, "geometry": { "type": "Point", "coordinates": [ 324275.52429414074868, 6136792.689549126662314 ] } },
-{ "type": "Feature", "properties": { "name": "Zalivino_RU" }, "geometry": { "type": "Point", "coordinates": [ 311189.655592917348258, 6097766.954334826208651 ] } }
+{ "type": "Feature", "properties": { "name": "Klaipeda" }, "geometry": { "type": "Point", "coordinates": [ 317168.465, 6179433.512 ] } },
+{ "type": "Feature", "properties": { "name": "Juodkrante" }, "geometry": { "type": "Point", "coordinates": [ 317047.839, 6161048.295 ] } },
+{ "type": "Feature", "properties": { "name": "Nida" }, "geometry": { "type": "Point", "coordinates": [ 309947.494, 6133652.274 ] } },
+{ "type": "Feature", "properties": { "name": "Vente" }, "geometry": { "type": "Point", "coordinates": [ 321761.159, 6137450.673 ] } },
+{ "type": "Feature", "properties": { "name": "Uostadvaris" }, "geometry": { "type": "Point", "coordinates": [ 324887.678, 6136211.188 ] } },
+{ "type": "Feature", "properties": { "name": "Rusne" }, "geometry": { "type": "Point", "coordinates": [ 333052.125, 6132050.893 ] } },
+{ "type": "Feature", "properties": { "name": "Silute" }, "geometry": { "type": "Point", "coordinates": [ 340249.733, 6136653.883 ] } },
+{ "type": "Feature", "properties": { "name": "Atmata_mouth" }, "geometry": { "type": "Point", "coordinates": [ 324275.524, 6136792.69 ] } },
+{ "type": "Feature", "properties": { "name": "Zalivino_RU" }, "geometry": { "type": "Point", "coordinates": [ 311189.656, 6097766.954 ] } }
 ]
 }

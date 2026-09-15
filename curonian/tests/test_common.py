@@ -3,6 +3,8 @@ import pandas as pd
 import pytest
 import common
 
+CRS_FOR_TEST = 3346
+
 
 def test_gauge_conversion_uses_500cm_zero():
     assert common.gauge_cm_to_m(500) == 0.0
@@ -51,3 +53,42 @@ def test_repo_paths_are_derived_from_this_file_not_hardcoded():
 def test_raw_inputs_exist():
     for p in (common.DEM_5M, common.EMODNET, common.ISOBATHS, common.DB, common.ERA5_2013, common.SFINCS_BIN):
         assert p.exists(), p
+
+
+def test_db_uri_percent_encodes_special_characters():
+    """A path with a space, '?' or '#' must survive as a literal sqlite URI path.
+
+    Unencoded, '?' starts the query string and '#' the fragment, so sqlite would
+    open the wrong (or no) file. Fixed paths today, but the bug is silent.
+    """
+    from pathlib import Path
+
+    uri = common._db_uri(Path("/tmp/odd name/db?x#y.gpkg"))
+    assert uri.startswith("file:/tmp/odd%20name/db%3Fx%23y.gpkg")
+    assert uri.endswith("?mode=ro")
+
+
+def test_db_uri_uses_the_project_database_by_default():
+    assert common._db_uri() == f"file:{common.DB}?mode=ro"
+
+
+def test_write_geojson_trims_coordinates_to_millimetres(tmp_path):
+    """Committed GeoJSON carried full float64 coordinates (17 significant digits).
+
+    In a projected CRS in metres, 3 decimals is a millimetre -- far below the 100 m
+    grid and the 5 m DEM -- so the extra digits are noise that makes every regenerated
+    file a large, unreadable diff.
+    """
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    gdf = gpd.GeoDataFrame({"name": ["a"]},
+                           geometry=[Point(317168.465127572009806, 6179433.5118923299014)],
+                           crs=CRS_FOR_TEST)
+    out = tmp_path / "pts.geojson"
+    common.write_geojson(gdf, out)
+
+    text = out.read_text()
+    assert "317168.465" in text
+    assert "317168.4651" not in text, "coordinates were not trimmed"
+    assert gpd.read_file(out).crs.to_epsg() == CRS_FOR_TEST

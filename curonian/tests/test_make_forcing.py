@@ -48,3 +48,32 @@ def test_real_gauges_and_discharge():
     q = mf.discharge_forcing()
     assert q.index[0] == common.TREF and q.index[-1] == common.TSTOP
     assert 350 < q[1].loc["2013-12-01":"2013-12-05"].mean() < 600 and (q[2] == common.MINIJA_Q_DEC).all()
+
+
+def test_bias_correct_ignores_observations_outside_the_calm_window():
+    """The offset must come from the calm window only.
+
+    The existing test puts every observation inside the window, so the `obs.loc[
+    window]` clip never does anything. Here the out-of-window readings are wildly
+    off: if they leaked into the mean, the offset would move by ~5 m.
+    """
+    t = pd.date_range("2013-11-27", "2013-12-10", freq="h")
+    model = pd.Series(0.5, index=t)
+    inside = pd.Series(0.05, index=pd.date_range("2013-11-28 06:00", "2013-12-03 06:00", freq="D"))
+    outside = pd.Series(10.0, index=pd.date_range("2013-12-06 06:00", "2013-12-09 06:00", freq="D"))
+    obs = pd.concat([inside, outside]).sort_index()
+
+    corrected, offset = mf.bias_correct(model, obs, common.CALM_WINDOW)
+    assert abs(offset - (0.05 - 0.5)) < 1e-9
+    assert abs(corrected.iloc[0] - 0.05) < 1e-9
+
+
+def test_boundary_forcing_raises_when_the_period_cannot_be_filled():
+    """Runtime validation must survive `python -O`, which strips bare asserts.
+
+    A sea boundary quietly full of NaN is the worst possible silent failure here:
+    SFINCS would be handed a boundary it cannot integrate.
+    """
+    outside = pd.date_range("2014-06-01", periods=48, freq="h")      # nowhere near the run period
+    with pytest.raises(ValueError, match="boundary"):
+        mf.boundary_forcing(pd.Series(np.nan, index=outside), npoints=7)
