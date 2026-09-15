@@ -1,5 +1,8 @@
 # SFINCS on Linux, and the Curonian Lagoon model built with it
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22772337.svg)](https://doi.org/10.5281/zenodo.22772337)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
 Two things live here:
 
 - **A native Linux build of SFINCS 2026.01 (v2.4.0 Galibier)** — Deltares ships
@@ -126,14 +129,23 @@ literature one.
 **This repository**
 
 > Razinkovas-Baziukas, A. (2026). *Curonian Lagoon SFINCS model: Storm Xaver
-> 2013 hindcast* [Software]. https://github.com/razinkele/sfincs
+> 2013 hindcast* (Version v1.0.0) [Software]. Zenodo.
+> https://doi.org/10.5281/zenodo.22772337
 
-Machine-readable metadata is in [`CITATION.cff`](CITATION.cff) (which GitHub
-renders as a "Cite this repository" button) and [`.zenodo.json`](.zenodo.json),
-which Zenodo reads when it archives a release. Both already carry the verified
-references below as related identifiers. Add the Zenodo DOI to all three places
-once the first release is archived — the commented `doi:` line in
-`CITATION.cff`, the citation above, and a badge here.
+Two DOIs exist, and which one you want depends on the claim you are making:
+
+| DOI | Resolves to | Use it when |
+| --- | --- | --- |
+| [10.5281/zenodo.22772337](https://doi.org/10.5281/zenodo.22772337) | always the newest version | citing the software in general |
+| [10.5281/zenodo.22772338](https://doi.org/10.5281/zenodo.22772338) | v1.0.0 specifically | reproducing a published result |
+
+For a paper, cite the **version** DOI — it is the one that pins the exact code a
+result came from.
+
+Machine-readable metadata is in [`CITATION.cff`](CITATION.cff) (GitHub renders it
+as a "Cite this repository" button) and [`.zenodo.json`](.zenodo.json), which
+Zenodo reads when archiving each release. Both carry the references below as
+related identifiers, so the citation graph records what this model is built on.
 
 **Model engine**
 
