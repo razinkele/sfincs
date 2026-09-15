@@ -7,7 +7,8 @@
   "creators": [
     {
       "name": "Razinkovas-Baziukas, Artūras",
-      "affiliation": "Marine Research Institute, Klaipėda University"
+      "affiliation": "Marine Research Institute, Klaipėda University",
+      "orcid": "0000-0001-5060-5532"
     }
   ],
   "keywords": [
@@ -21,9 +22,29 @@
     "Lithuania"
   ],
   "related_identifiers": [
-    { "identifier": "10.1016/j.coastaleng.2020.103796", "relation": "isDerivedFrom", "scheme": "doi", "resource_type": "publication-article" },
-    { "identifier": "10.21105/joss.04897",              "relation": "isDerivedFrom", "scheme": "doi", "resource_type": "publication-article" },
-    { "identifier": "10.1002/qj.3803",                  "relation": "references",    "scheme": "doi", "resource_type": "publication-article" },
-    { "identifier": "10.3389/fmars.2020.00263",         "relation": "references",    "scheme": "doi", "resource_type": "publication-article" }
+    {
+      "identifier": "10.1016/j.coastaleng.2020.103796",
+      "relation": "isDerivedFrom",
+      "scheme": "doi",
+      "resource_type": "publication-article"
+    },
+    {
+      "identifier": "10.21105/joss.04897",
+      "relation": "isDerivedFrom",
+      "scheme": "doi",
+      "resource_type": "publication-article"
+    },
+    {
+      "identifier": "10.1002/qj.3803",
+      "relation": "references",
+      "scheme": "doi",
+      "resource_type": "publication-article"
+    },
+    {
+      "identifier": "10.3389/fmars.2020.00263",
+      "relation": "references",
+      "scheme": "doi",
+      "resource_type": "publication-article"
+    }
   ]
 }
