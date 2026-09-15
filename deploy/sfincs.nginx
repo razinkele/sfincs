@@ -9,6 +9,11 @@
 # proxy_read_timeout is 86400s to match the other model panels — figure and
 # netCDF reads are slower than a typical page, and a websocket that is idle
 # while a user reads a validation table must not be culled.
+#
+# The `location = /sfincs` redirect is NOT cosmetic: the app references its
+# figures with relative URLs (figures/<run>/<file>.png), which only resolve
+# against /sfincs/ — reached without the trailing slash, every figure would
+# 404 against the site root.
 
     # =========================================================================
     # SFINCS — Curonian Lagoon flood model viewer (Python Shiny via port 3838)
