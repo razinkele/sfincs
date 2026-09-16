@@ -38,6 +38,7 @@ built on; a different machine needs those four sources and an edit there.
 | `logs/` | configure/make output and micromamba transaction logs |
 | `test_model_hydromt/` | Same test case built via HydroMT-SFINCS |
 | `hydromt-sfincs*.yml`, `hydromt-sfincs.sitecustomize.py` | Model-builder env spec, lock, and zlib fix |
+| `mcp/meteo-lt/` | Local MCP server over LHMT's open data API, see below |
 
 ## Running a model
 
@@ -118,6 +119,26 @@ which writes `manning_sea = 0.02` for cells below datum instead of the uniform 0
 hydromt_sfincs 2.0.0 (component-based API, `sf.grid.create()` etc.) exists only as a
 release candidate on PyPI as of September 2026; it needs hydromt >= 1.3 and would go in
 a separate env. Docs: https://deltares.github.io/hydromt_sfincs/
+
+## The `meteo-lt` MCP server
+
+[`mcp/meteo-lt/`](mcp/meteo-lt/README.md) is a local MCP server over
+[api.meteo.lt](https://api.meteo.lt/), the open API of the Lithuanian
+Hydrometeorological Service — the body that supplies this repository's gauge water
+levels and river discharge. It is registered in `~/.claude.json` and runs through
+`uv run --script` off a PEP 723 header, resolving its own dependencies, so it never
+touches the `hydromt-sfincs` environment.
+
+It reads the same API the discharge-provenance fixture was taken from —
+`curonian/tests/data/lhmt_smalininkai_2013.csv`, the LHMT record that
+`curonian/tests/test_forcing_provenance.py` checks the Nemunas forcing against.
+
+Coverage is uneven, and that server's README documents it station by station. The
+short version: hydrological `historical` is daily back to 2000, `measured` is hourly
+but reaches back only 30 days, and some stations — including
+`klaipedos-juru-uosto-vms`, the Baltic seaport gauge — have no historical record at
+all. That is why this API cannot supply the hourly 2013 sea boundary the Curonian
+model needs.
 
 ## Citation
 
@@ -209,7 +230,8 @@ held locally (see `curonian/data_catalog.yml`) and is not redistributed here.
 ## Licence
 
 This repository's own code — the `curonian/` model pipeline, `run_sfincs.sh`,
-the test models and the documentation — is licensed under the **GNU GPL-3.0-or-later**
+the `meteo-lt` MCP server, the test models and the documentation — is licensed
+under the **GNU GPL-3.0-or-later**
 ([`LICENSE`](LICENSE)), matching SFINCS itself, which it builds and drives.
 
 That licence does **not** extend to the third-party material referenced here,
