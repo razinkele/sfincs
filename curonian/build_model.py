@@ -11,8 +11,6 @@ from scipy import ndimage
 
 import common
 
-XAVER = common.EVENTS["xaver_2013"]
-
 # Order is deliberate, not the spec's DEM-first prose: the DEM is a flat 0 inside the
 # lagoon, and setup_dep's merge_method="first" keeps the first valid value at each
 # cell, so the lagoon bathymetry (masked to the lagoon) must come first or it would
@@ -59,17 +57,38 @@ def parse_args(argv=None) -> argparse.Namespace:
                     help="uniform: the Nida point series (wind.csv); grid: gridded ERA5 wind (era5_grid.nc)")
     p.add_argument("--pressure", action="store_true",
                     help="also add gridded ERA5 mean sea level pressure forcing (needs --wind grid's era5_grid.nc)")
-    p.add_argument("--run-name", default="xaver_2013", help="subdirectory of runs/ to build into")
+    p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
+    p.add_argument("--run-name", default=None, help="subdirectory of runs/; defaults to the event name")
     args = p.parse_args(argv)
     if args.pressure and args.wind != "grid":
         raise SystemExit("--pressure requires --wind grid")
+    args.run_name = args.run_name or args.event
     return args
 
 
-def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "uniform", pressure: bool = False):
+def config_for(event: common.Event, zs_boundary: float) -> dict:
+    """SFINCS config for this event. zsini is the event's if it sets one.
+
+    Xaver leaves zsini=None and takes the sea boundary's first value, which was
+    within 0.05-0.11 m of its lagoon gauges. April's lagoon stands ~0.23 m above
+    the sea at TREF, so the boundary would start the whole lagoon low.
+    """
+    return dict(
+        tref=event.tref.strftime("%Y%m%d %H%M%S"), tstart=event.tref.strftime("%Y%m%d %H%M%S"),
+        tstop=event.tstop.strftime("%Y%m%d %H%M%S"),
+        advection=1, alpha=0.5, huthresh=0.05, viscosity=1,
+        dtout=3600, dthisout=600, dtmaxout=99999999,
+        manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
+        zsini=event.zsini if event.zsini is not None else zs_boundary,
+    )
+
+
+def build(event: common.Event, run_dir: Path | None = None, subgrid: bool = True,
+          wind: str = "uniform", pressure: bool = False):
     from hydromt_sfincs import SfincsModel
 
-    inputs = common.INPUTS
+    run_dir = run_dir or common.RUNS / event.name
+    inputs, static = event.inputs_dir, common.INPUTS
     sf = SfincsModel(root=str(run_dir), mode="w+", data_libs=[str(common.ROOT / "data_catalog.yml")], write_gis=False)
     sf.setup_grid(x0=common.X0, y0=common.Y0, dx=common.DX, dy=common.DY, nmax=common.NMAX, mmax=common.MMAX,
                   rotation=0, epsg=common.CRS)
@@ -91,25 +110,18 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
         sf.setup_manning_roughness(manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
                                    rgh_lev_land=RGH_LEV_LAND)
 
-    sf.setup_config(
-        tref=common.TREF.strftime("%Y%m%d %H%M%S"), tstart=common.TREF.strftime("%Y%m%d %H%M%S"),
-        tstop=common.TSTOP.strftime("%Y%m%d %H%M%S"),
-        advection=1, alpha=0.5, huthresh=0.05, viscosity=1,
-        dtout=3600, dthisout=600, dtmaxout=99999999,
-        # Inert under a subgrid (see MANNING_LAND); written so sfincs.inp reports the
-        # same roughness the subgrid tables were built with instead of SFINCS' 0.04.
-        manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
-    )
-    bzs = _read_ts(XAVER.inputs_dir / "bzs.csv")
-    sf.setup_config(zsini=float(bzs.iloc[0].mean()))
+    bzs = _read_ts(inputs / "bzs.csv")
+    # config_for's zsini is the event's if it sets one, else the sea boundary's first
+    # value (see config_for's docstring for why that split exists).
+    sf.setup_config(**config_for(event, zs_boundary=float(bzs.iloc[0].mean())))
     sf.setup_waterlevel_forcing(timeseries=bzs,
-                                locations=gpd.read_file(inputs / "boundary_points.geojson").set_index("index", drop=False))
-    sf.setup_discharge_forcing(timeseries=_read_ts(XAVER.inputs_dir / "dis.csv"),
-                               locations=gpd.read_file(inputs / "dis_points.geojson").set_index("index", drop=False))
+                                locations=gpd.read_file(static / "boundary_points.geojson").set_index("index", drop=False))
+    sf.setup_discharge_forcing(timeseries=_read_ts(inputs / "dis.csv"),
+                               locations=gpd.read_file(static / "dis_points.geojson").set_index("index", drop=False))
     if wind == "grid":
-        sf.setup_wind_forcing_from_grid(wind=str(XAVER.inputs_dir / "era5_grid.nc"))
+        sf.setup_wind_forcing_from_grid(wind=str(inputs / "era5_grid.nc"))
     else:
-        sf.setup_wind_forcing(timeseries=str(XAVER.inputs_dir / "wind.csv"))
+        sf.setup_wind_forcing(timeseries=str(inputs / "wind.csv"))
     if pressure:
         # pavbnd stays 0 (hydromt_sfincs' own default, unchanged here): the GTSM
         # boundary series already carries the inverse-barometer effect baked in from
@@ -117,8 +129,8 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
         # ERA5 grid would double-count it. baro is already 1 in the written config
         # (also hydromt_sfincs' default), so SFINCS still applies the pressure
         # gradient force from netampfile inside the domain.
-        sf.setup_pressure_forcing_from_grid(press=str(XAVER.inputs_dir / "era5_grid.nc"))
-    sf.setup_observation_points(locations=gpd.read_file(inputs / "stations.geojson"))
+        sf.setup_pressure_forcing_from_grid(press=str(inputs / "era5_grid.nc"))
+    sf.setup_observation_points(locations=gpd.read_file(static / "stations.geojson"))
     sf.write()
     r = check_model(run_dir)
     print(r)
@@ -152,4 +164,5 @@ def check_model(run_dir: Path = common.RUN_XAVER) -> dict:
 
 if __name__ == "__main__":
     args = parse_args()
-    build(run_dir=common.RUNS / args.run_name, subgrid=not args.no_subgrid, wind=args.wind, pressure=args.pressure)
+    build(common.event(args.event), run_dir=common.RUNS / args.run_name, subgrid=not args.no_subgrid,
+          wind=args.wind, pressure=args.pressure)
