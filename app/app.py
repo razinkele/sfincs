@@ -71,7 +71,8 @@ ABOUT = ui.markdown(
     """
 **SFINCS** (Super-Fast INundation of CoastS) is a reduced-physics compound
 flood model from Deltares.  This viewer publishes completed runs of the
-Curonian Lagoon / Nemunas delta set-up for the December 2013 storm *Xaver*.
+Curonian Lagoon / Nemunas delta set-up: the December 2013 storm surge *Xaver*
+and the April 2013 Nemunas spring freshet.
 
 Runs are produced offline with HydroMT-SFINCS; this page is read-only.
 """
@@ -151,6 +152,12 @@ def server(input, output, session):
             selected=[c for c in ("Klaipeda", "Nida", "Vente", "Uostadvaris") if c in columns]
             or columns[:4],
         )
+
+    @reactive.effect
+    def _sync_storm_only_label():
+        """Xaver calls its scored window "Storm window"; April calls it
+        "Scoring window". The switch keeps the report's own name."""
+        ui.update_switch("storm_only", label=f"{sd.scored_window_name(variant())} only")
 
     # ---- sidebar -------------------------------------------------------
 
@@ -284,7 +291,7 @@ def server(input, output, session):
 
         window = frame
         if input.storm_only():
-            span = sd.periods(variant()).get("Storm window", "")
+            span = sd.periods(variant()).get(sd.scored_window_name(variant()), "")
             start, _, stop = span.partition(" to ")
             if start and stop:
                 window = frame.loc[start.strip():stop.strip()]
