@@ -1,6 +1,7 @@
-"""Forcing time series for the Xaver run: sea boundary, uniform wind, river discharge."""
+"""Forcing time series for an event: sea boundary, uniform wind, river discharge."""
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import geopandas as gpd
@@ -14,13 +15,11 @@ import common
 NEMUNAS_APEX_LONLAT = (21.38, 55.30)   # Rusnė, where the Nemunas splits into Atmata and Skirvytė
 MINIJA_MOUTH_LONLAT = (21.25, 55.42)
 
-XAVER = common.EVENTS["xaver_2013"]
 
-
-def load_gauge_levels(site: str) -> pd.Series:
+def load_gauge_levels(site: str, event: common.Event) -> pd.Series:
     df = common.read_table(
-        "SELECT date, wlevel_06, wlevel_18 FROM physical_daily WHERE site=? AND date BETWEEN '2013-11-20' AND '2013-12-20'",
-        (site,))
+        "SELECT date, wlevel_06, wlevel_18 FROM physical_daily WHERE site=? AND date BETWEEN ? AND ?",
+        (site, *event.data_window))
     rows = []
     for _, r in df.iterrows():
         for col, hh in (("wlevel_06", 6), ("wlevel_18", 18)):
@@ -38,13 +37,13 @@ def bias_correct(model: pd.Series, obs: pd.Series, window) -> tuple[pd.Series, f
     return model + offset, offset
 
 
-def boundary_forcing(gtsm: pd.Series, npoints: int) -> pd.DataFrame:
-    t = pd.date_range(common.TREF, common.TSTOP, freq="h")
+def boundary_forcing(gtsm: pd.Series, npoints: int, event: common.Event) -> pd.DataFrame:
+    t = pd.date_range(event.tref, event.tstop, freq="h")
     s = gtsm.reindex(t).interpolate(limit_direction="both")
     if not s.notna().all():
         raise ValueError(f"sea boundary has {int(s.isna().sum())} of {len(s)} steps still NaN after "
                          f"interpolation; the source series covers {gtsm.index.min()}..{gtsm.index.max()}, "
-                         f"the run needs {common.TREF}..{common.TSTOP}")
+                         f"the run needs {event.tref}..{event.tstop}")
     return pd.DataFrame({i: s.values for i in range(1, npoints + 1)}, index=t)
 
 
@@ -54,17 +53,33 @@ def wind_from_uv(t, u, v) -> pd.DataFrame:
     return pd.DataFrame({"mag": mag, "dir": direction}, index=pd.DatetimeIndex(t))
 
 
-def wind_forcing(era5_path: Path = common.ERA5_2013) -> pd.DataFrame:
+def check_wind(df: pd.DataFrame, event: common.Event) -> None:
+    """Guard the wind series. The span check runs for every event; the peak check
+    only where the event has a signature worth asserting.
+
+    Without the span check, an event with wind_check=None would accept a truncated
+    or empty slice and hand SFINCS a wind file that does not cover the run.
+    """
+    if df.empty or df.index[0] > event.tref - pd.Timedelta("1h") or df.index[-1] < event.tstop + pd.Timedelta("1h"):
+        span = f"{df.index[0]}..{df.index[-1]}" if not df.empty else "empty"
+        raise ValueError(f"wind series {span} does not cover {event.name} "
+                         f"({event.tref}..{event.tstop})")
+    if not df.notna().all().all():
+        raise ValueError(f"wind series has NaN in {df.columns[df.isna().any()].tolist()}")
+    if event.wind_check is not None:
+        floor, what = event.wind_check
+        if df["mag"].max() <= floor:
+            raise ValueError(f"peak wind is only {df['mag'].max():.1f} m/s -- expected "
+                             f"{what} (>{floor:g} m/s)")
+
+
+def wind_forcing(event: common.Event, era5_path: Path = common.ERA5_2013) -> pd.DataFrame:
     with nc.Dataset(era5_path) as d:
         t = pd.to_datetime(d["valid_time"][:].astype("int64"), unit="s")
         u = d["u10"][:, 0, 0].astype(float); v = d["v10"][:, 0, 0].astype(float)
     df = wind_from_uv(t, u, v)
-    df = df.loc[common.TREF - pd.Timedelta("1h"): common.TSTOP + pd.Timedelta("1h")]
-    if not df.notna().all().all():
-        raise ValueError(f"wind series has NaN in {df.columns[df.isna().any()].tolist()}")
-    if df["mag"].max() <= 15:
-        raise ValueError(f"peak wind is only {df['mag'].max():.1f} m/s -- expected the Xaver gale "
-                         f"(>15 m/s) in {era5_path}")
+    df = df.loc[event.tref - pd.Timedelta("1h"): event.tstop + pd.Timedelta("1h")]
+    check_wind(df, event)
     return df
 
 
@@ -75,7 +90,8 @@ def lag_and_resample(daily: pd.Series, lag_days: int, start: pd.Timestamp, stop:
     return hourly.loc[start:stop]
 
 
-def cmems_daily_boundary(path: Path = common.HOME / "curonian/shyfem_box/cmems_boundary/cmems_bal_boundary_2009_2014.nc",
+def cmems_daily_boundary(event: common.Event,
+                         path: Path = common.HOME / "curonian/shyfem_box/cmems_boundary/cmems_bal_boundary_2009_2014.nc",
                          lonlat=common.KLAIPEDA_MOUTH_LONLAT) -> pd.Series:
     """Fallback sea level: daily-mean CMEMS `sla` at the grid point nearest the mouth, interpolated to hourly."""
     with nc.Dataset(path) as d:
@@ -83,7 +99,7 @@ def cmems_daily_boundary(path: Path = common.HOME / "curonian/shyfem_box/cmems_b
         la, lo = d["latitude"][:], d["longitude"][:]
         i, j = int(np.argmin(abs(la - lonlat[1]))), int(np.argmin(abs(lo - lonlat[0])))
         sla = np.ma.filled(d["sla"][:, i, j], np.nan)
-    daily = pd.Series(sla, index=t + pd.Timedelta(hours=12)).loc["2013-11-20":"2013-12-20"]   # daily means -> noon
+    daily = pd.Series(sla, index=t + pd.Timedelta(hours=12)).loc[event.data_window[0]:event.data_window[1]]   # daily means -> noon
     hourly = daily.resample("h").interpolate("linear")
     if not hourly.notna().all():
         raise ValueError(f"CMEMS sla has {int(hourly.isna().sum())} gaps near the mouth")
@@ -91,16 +107,16 @@ def cmems_daily_boundary(path: Path = common.HOME / "curonian/shyfem_box/cmems_b
     return hourly
 
 
-def discharge_forcing() -> pd.DataFrame:
+def discharge_forcing(event: common.Event) -> pd.DataFrame:
     df = common.read_table(
         "SELECT date, discharge_m3s FROM river_discharge WHERE river='Nemunas' AND gauge='Smalininkai' "
-        "AND date BETWEEN '2013-11-20' AND '2013-12-20' ORDER BY date")
+        "AND date BETWEEN ? AND ? ORDER BY date", event.data_window)
     daily = pd.Series(df["discharge_m3s"].values, index=pd.to_datetime(df["date"]))
-    nem = lag_and_resample(daily, common.NEMUNAS_LAG_DAYS, common.TREF, common.TSTOP)
-    if not nem.notna().all() or nem.index[0] != common.TREF or nem.index[-1] != common.TSTOP:
-        raise ValueError(f"Nemunas discharge does not cover the run period cleanly: "
+    nem = lag_and_resample(daily, event.nemunas_lag_days, event.tref, event.tstop)
+    if not nem.notna().all() or nem.index[0] != event.tref or nem.index[-1] != event.tstop:
+        raise ValueError(f"Nemunas discharge does not cover {event.name} cleanly: "
                          f"{nem.index[0]}..{nem.index[-1]} with {int(nem.isna().sum())} NaN")
-    return pd.DataFrame({1: nem.values, 2: common.MINIJA_Q_DEC}, index=nem.index)
+    return pd.DataFrame({1: nem.values, 2: event.minija_q}, index=nem.index)
 
 
 def discharge_points() -> gpd.GeoDataFrame:
@@ -108,43 +124,53 @@ def discharge_points() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame({"index": [1, 2], "name": ["Nemunas_Rusne", "Minija_mouth"]}, geometry=pts, crs=common.CRS)
 
 
-def main(inputs: Path = common.INPUTS, use_cmems: bool = False) -> None:
+def main(event: common.Event, static: Path = common.INPUTS, use_cmems: bool = False) -> None:
+    out = event.inputs_dir
+    out.mkdir(parents=True, exist_ok=True)
     if use_cmems:
-        gtsm = cmems_daily_boundary()
+        gtsm = cmems_daily_boundary(event)
         print("using the daily CMEMS cache as sea boundary (fallback)")
     else:
-        gtsm = pd.read_csv(XAVER.inputs_dir / "gtsm_klaipeda.csv", index_col=0, parse_dates=True)["waterlevel_m"]
+        gtsm = pd.read_csv(out / "gtsm_klaipeda.csv", index_col=0, parse_dates=True)["waterlevel_m"]
     # Spec section 5 checks the boundary against the Klaipeda 06:00 series only; restrict
     # here even though load_gauge_levels("Klaipeda") currently returns only 06:00 readings
     # anyway (no wlevel_18 rows exist for this site).
-    klaipeda = load_gauge_levels("Klaipeda")
+    klaipeda = load_gauge_levels("Klaipeda", event)
     klaipeda_06 = klaipeda.loc[klaipeda.index.hour == 6]
-    corrected, offset = bias_correct(gtsm, klaipeda_06, common.CALM_WINDOW)
-    bnd_pts = gpd.read_file(inputs / "boundary_points.geojson")
-    bzs = boundary_forcing(corrected, len(bnd_pts))
-    bzs.to_csv(XAVER.inputs_dir / "bzs.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
+    corrected, offset = bias_correct(gtsm, klaipeda_06, event.calm_window)
+    bnd_pts = gpd.read_file(static / "boundary_points.geojson")             # static, shared
+    bzs = boundary_forcing(corrected, len(bnd_pts), event)
+    bzs.to_csv(out / "bzs.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
 
-    wind = wind_forcing()
-    wind.to_csv(XAVER.inputs_dir / "wind.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
+    wind = wind_forcing(event)
+    wind.to_csv(out / "wind.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
 
-    dis = discharge_forcing()
-    dis.to_csv(XAVER.inputs_dir / "dis.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
-    common.write_geojson(discharge_points(), inputs / "dis_points.geojson")
+    dis = discharge_forcing(event)
+    dis.to_csv(out / "dis.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
+    common.write_geojson(discharge_points(), static / "dis_points.geojson")  # static, shared: both events discharge at the same two points
 
-    storm = corrected.loc["2013-12-05":"2013-12-08"]
-    summary = (f"GTSM offset applied: {offset:+.3f} m (calm window {common.CALM_WINDOW[0].date()}..{common.CALM_WINDOW[1].date()})\n"
-               f"boundary level: start {corrected.loc[common.TREF]:.2f} m, storm peak {storm.max():.2f} m at {storm.idxmax()}\n"
+    peak = corrected.loc[event.peak_window[0]:event.peak_window[1]]
+    summary = (f"GTSM offset applied: {offset:+.3f} m (calm window {event.calm_window[0].date()}..{event.calm_window[1].date()})\n"
+               f"boundary level: start {corrected.loc[event.tref]:.2f} m, "
+               f"{event.peak_label} peak {peak.max():.2f} m at {peak.idxmax()}\n"
                f"Klaipeda 06h obs peak: {klaipeda_06.max():.2f} m at {klaipeda_06.idxmax()}\n"
                f"wind peak: {wind['mag'].max():.1f} m/s at {wind['mag'].idxmax()} from {wind.loc[wind['mag'].idxmax(), 'dir']:.0f} deg\n"
-               f"Nemunas Q: {dis[1].min():.0f}..{dis[1].max():.0f} m3/s; Minija constant {common.MINIJA_Q_DEC} m3/s\n")
-    gap = abs(storm.idxmax() - klaipeda_06.idxmax())
+               f"Nemunas Q: {dis[1].min():.0f}..{dis[1].max():.0f} m3/s; Minija constant {event.minija_q} m3/s\n")
+    gap = abs(peak.idxmax() - klaipeda_06.idxmax())
     if gap > pd.Timedelta("12h"):
-        summary += (f"FINDING: GTSM storm peak ({storm.idxmax()}) is {gap} from the Klaipeda 06:00 gauge peak "
+        summary += (f"FINDING: GTSM {event.peak_label} peak ({peak.idxmax()}) is {gap} from the Klaipeda 06:00 gauge peak "
                     f"({klaipeda_06.idxmax()}) -- more than the 12 h check tolerance. Not a blocker: recorded per spec.\n")
-    (XAVER.inputs_dir / "forcing_summary.txt").write_text(summary)
+    (out / "forcing_summary.txt").write_text(summary)
     print(summary)
 
 
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
+    p.add_argument("--cmems", action="store_true", help="daily CMEMS fallback sea boundary")
+    return p.parse_args(argv)
+
+
 if __name__ == "__main__":
-    import sys
-    main(use_cmems="--cmems" in sys.argv)
+    args = parse_args()
+    main(common.event(args.event), use_cmems=args.cmems)
