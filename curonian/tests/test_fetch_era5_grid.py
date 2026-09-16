@@ -7,6 +7,8 @@ import xarray as xr
 import common
 from prep import fetch_era5_grid as feg
 
+XAVER = common.EVENTS["xaver_2013"]
+
 
 def _synthetic_raw(extra_hours=6):
     """Synthetic raw-CDS-shaped ERA5 dataset: dims (valid_time, latitude, longitude),
@@ -99,7 +101,7 @@ def test_nida_check_near_zero_on_matching_point():
 
 @pytest.mark.integration
 def test_real_era5_grid_covers_the_period():
-    path = common.INPUTS / "era5_grid_xaver.nc"
+    path = XAVER.inputs_dir / "era5_grid.nc"
     if not path.exists():
         pytest.skip("run prep.fetch_era5_grid first")
     with xr.open_dataset(path) as ds:

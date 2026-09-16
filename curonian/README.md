@@ -79,7 +79,7 @@ Flooded land in the delta window (depth > 5 cm, ground > 0 m): **165.6 km²**
 - Info: Uostadvaris 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.60 m vs gauge 0.83 m, err -0.23 m (threshold: n/a (context only))
 - Info: Nida 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.52 m vs gauge 0.74 m, err -0.22 m (threshold: n/a (context only))
 
-Forcing as run (`inputs/forcing_summary.txt`): GTSM boundary offset +0.092 m
+Forcing as run (`inputs/xaver_2013/forcing_summary.txt`): GTSM boundary offset +0.092 m
 (calm window 28 Nov–4 Dec 2013), boundary peak 1.00 m at 2013-12-07 07:00;
 wind peak 19.5 m/s at 2013-12-06 06:00 from 236°; Nemunas discharge
 351–653 m³/s, Minija held constant at 46.0 m³/s. The wind peak coincides
@@ -93,7 +93,7 @@ below.
   corrected by +0.092 m over the calm window 28 Nov–4 Dec 2013 and peaks at
   1.00 m at 2013-12-07 07:00. The Klaipeda 06:00 gauge peaks at 0.88 m at
   2013-12-06 06:00, 25 h earlier than the raw boundary peak — recorded as a
-  FINDING against the 12 h check tolerance in `inputs/forcing_summary.txt`,
+  FINDING against the 12 h check tolerance in `inputs/xaver_2013/forcing_summary.txt`,
   not treated as a blocker. Compared reading-by-reading against the Klaipeda
   06:00 series itself, whole-period RMSE is 0.08 m (r = 0.91) and the
   storm-window (5–9 Dec) RMSE is 0.12 m (r = 0.73) — both inside the ±0.15 m
@@ -176,7 +176,7 @@ above (that list is reordered above to reflect what these runs found).
 `prep/fetch_era5_grid.py` fetches the hourly, 0.25° ERA5
 reanalysis-era5-single-levels grid over a box around the lagoon (56.0–54.75°N,
 20.25–22.0°E; 8×6 cells) for 27 Nov–11 Dec 2013 and reshapes it to
-`inputs/era5_grid_xaver.nc` (`wind10_u`, `wind10_v`, `press_msl` on
+`inputs/xaver_2013/era5_grid.nc` (`wind10_u`, `wind10_v`, `press_msl` on
 `time, y, x`). `build_model.py --wind grid --run-name xaver_2013_gridwind`
 calls `setup_wind_forcing_from_grid` on that file instead of
 `setup_wind_forcing`'s single-point `wind.csv` (`sfincs.inp` gets
@@ -192,7 +192,7 @@ Bathymetry, subgrid, boundary, discharge and river forcing are unchanged from
 `runs/xaver_2013`; both variants pass the same `check_model()` gate
 (`{'n_active': 331933, 'n_bnd': 70, 'connected': True, 'bnd_in_ring': True}`,
 identical to the baseline) and are scored by `validate.py --run <name>` the
-same way as the baseline. `inputs/era5_grid_summary.txt` records the fetch: a
+same way as the baseline. `inputs/xaver_2013/era5_grid_summary.txt` records the fetch: a
 315-step, 8×6-cell, 0.25° grid for 2013-11-27 23:00–2013-12-11 01:00; Nida-point
 wind speed RMSE 0.000 m/s against the existing point series (well inside the
 0.5 m/s check); peak wind speed 20.6 m/s at 2013-12-06 03:00 (55.50°N,
@@ -274,12 +274,12 @@ Git-ignored derived inputs that a clean checkout must regenerate before
 `build_model.py` will run:
 
 - `inputs/lagoon_bathy_50m.tif` -- `prep.make_bathymetry` (`*.tif` is ignored)
-- `inputs/era5_grid_xaver.nc` and `inputs/era5_raw_2013_11_12.nc` --
+- `inputs/xaver_2013/era5_grid.nc` and `inputs/xaver_2013/era5_raw.nc` --
   `prep.fetch_era5_grid`, needed only for `--wind grid` (`*.nc` is ignored)
 
-`prep.fetch_gtsm`'s CDS download (`inputs/gtsm_2013_11_12.zip` and the directory
-it extracts to) is also ignored, but its *derived* product
-`inputs/gtsm_klaipeda.csv` is committed -- so a clean checkout does not need
+`prep.fetch_gtsm`'s CDS download (`inputs/xaver_2013/gtsm.zip` and the directory
+it extracts to, `inputs/xaver_2013/gtsm/`) is also ignored, but its *derived*
+product `inputs/xaver_2013/gtsm_klaipeda.csv` is committed -- so a clean checkout does not need
 `~/.cdsapirc` unless the boundary is being rebuilt from scratch. Everything else
 under `inputs/` is committed.
 
@@ -302,7 +302,7 @@ What `pytest tests` proves at each level:
   (`pytest.skip(...)`) rather than failing a checkout that hasn't built the
   model yet or fetched GTSM yet: `test_built_model_passes_checks` (needs
   `runs/xaver_2013/sfincs.inp`) and `test_real_gtsm_csv_covers_the_event`
-  (needs `inputs/gtsm_klaipeda.csv`). The other `integration` tests read the
+  (needs `inputs/xaver_2013/gtsm_klaipeda.csv`). The other `integration` tests read the
   raw sources directly and fail (not skip) if those paths aren't mounted.
 - `... pytest tests -q -m "not network"` — the same, minus the one test that
   makes a live Overpass call (which itself also skips on a 5xx/timeout/

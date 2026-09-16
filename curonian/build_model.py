@@ -11,6 +11,8 @@ from scipy import ndimage
 
 import common
 
+XAVER = common.EVENTS["xaver_2013"]
+
 # Order is deliberate, not the spec's DEM-first prose: the DEM is a flat 0 inside the
 # lagoon, and setup_dep's merge_method="first" keeps the first valid value at each
 # cell, so the lagoon bathymetry (masked to the lagoon) must come first or it would
@@ -54,9 +56,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--no-subgrid", action="store_true", help="skip setup_subgrid (see README Limitations)")
     p.add_argument("--wind", choices=("uniform", "grid"), default="uniform",
-                    help="uniform: the Nida point series (wind.csv); grid: gridded ERA5 wind (era5_grid_xaver.nc)")
+                    help="uniform: the Nida point series (wind.csv); grid: gridded ERA5 wind (era5_grid.nc)")
     p.add_argument("--pressure", action="store_true",
-                    help="also add gridded ERA5 mean sea level pressure forcing (needs --wind grid's era5_grid_xaver.nc)")
+                    help="also add gridded ERA5 mean sea level pressure forcing (needs --wind grid's era5_grid.nc)")
     p.add_argument("--run-name", default="xaver_2013", help="subdirectory of runs/ to build into")
     args = p.parse_args(argv)
     if args.pressure and args.wind != "grid":
@@ -98,16 +100,16 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
         # same roughness the subgrid tables were built with instead of SFINCS' 0.04.
         manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
     )
-    bzs = _read_ts(inputs / "bzs.csv")
+    bzs = _read_ts(XAVER.inputs_dir / "bzs.csv")
     sf.setup_config(zsini=float(bzs.iloc[0].mean()))
     sf.setup_waterlevel_forcing(timeseries=bzs,
                                 locations=gpd.read_file(inputs / "boundary_points.geojson").set_index("index", drop=False))
-    sf.setup_discharge_forcing(timeseries=_read_ts(inputs / "dis.csv"),
+    sf.setup_discharge_forcing(timeseries=_read_ts(XAVER.inputs_dir / "dis.csv"),
                                locations=gpd.read_file(inputs / "dis_points.geojson").set_index("index", drop=False))
     if wind == "grid":
-        sf.setup_wind_forcing_from_grid(wind=str(inputs / "era5_grid_xaver.nc"))
+        sf.setup_wind_forcing_from_grid(wind=str(XAVER.inputs_dir / "era5_grid.nc"))
     else:
-        sf.setup_wind_forcing(timeseries=str(inputs / "wind.csv"))
+        sf.setup_wind_forcing(timeseries=str(XAVER.inputs_dir / "wind.csv"))
     if pressure:
         # pavbnd stays 0 (hydromt_sfincs' own default, unchanged here): the GTSM
         # boundary series already carries the inverse-barometer effect baked in from
@@ -115,7 +117,7 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
         # ERA5 grid would double-count it. baro is already 1 in the written config
         # (also hydromt_sfincs' default), so SFINCS still applies the pressure
         # gradient force from netampfile inside the domain.
-        sf.setup_pressure_forcing_from_grid(press=str(inputs / "era5_grid_xaver.nc"))
+        sf.setup_pressure_forcing_from_grid(press=str(XAVER.inputs_dir / "era5_grid.nc"))
     sf.setup_observation_points(locations=gpd.read_file(inputs / "stations.geojson"))
     sf.write()
     r = check_model(run_dir)

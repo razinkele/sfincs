@@ -16,6 +16,8 @@ import pytest
 
 import common
 
+XAVER = common.EVENTS["xaver_2013"]
+
 FIXTURE = Path(__file__).parent / "data" / "lhmt_smalininkai_2013.csv"
 STATION = "smalininku-vms"
 API = "https://api.meteo.lt/v1"
@@ -28,7 +30,7 @@ def lhmt() -> pd.Series:
 
 
 def model() -> pd.DataFrame:
-    df = pd.read_csv(common.INPUTS / "dis.csv", index_col=0, parse_dates=True)
+    df = pd.read_csv(XAVER.inputs_dir / "dis.csv", index_col=0, parse_dates=True)
     df.columns = [int(c) for c in df.columns]
     return df
 

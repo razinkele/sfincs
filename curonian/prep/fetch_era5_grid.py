@@ -18,6 +18,8 @@ import xarray as xr
 
 import common
 
+XAVER = common.EVENTS["xaver_2013"]
+
 DATASET = "reanalysis-era5-single-levels"
 REQUEST = {
     "product_type": ["reanalysis"],
@@ -34,7 +36,7 @@ REQUEST = {
 NIDA_LONLAT = (21.0, 55.25)   # ERA5 grid node used for the baseline uniform-wind point series
 
 
-def download(target: Path = common.INPUTS / "era5_raw_2013_11_12.nc") -> Path:
+def download(target: Path = XAVER.inputs_dir / "era5_raw.nc") -> Path:
     import cdsapi
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.stat().st_size > 1_000_000:
@@ -137,11 +139,11 @@ def main() -> xr.Dataset:
         ds = to_hydromt(raw_ds.load())
 
     # Check the in-memory dataset before writing anything: if nida_check's assertion
-    # fails, no era5_grid_xaver.nc (or summary) should be left on disk to be picked up
+    # fails, no era5_grid.nc (or summary) should be left on disk to be picked up
     # by a later build.
     rmse = nida_check(ds)
 
-    out = common.INPUTS / "era5_grid_xaver.nc"
+    out = XAVER.inputs_dir / "era5_grid.nc"
     ds.to_netcdf(out, encoding={"time": {"units": "hours since 1970-01-01"}})
 
     speed = np.hypot(ds["wind10_u"], ds["wind10_v"])
@@ -168,7 +170,7 @@ def main() -> xr.Dataset:
         f"mean sea level pressure: {mean_press:.0f} Pa\n"
         f"pressure minimum: {min_press:.0f} Pa at {min_press_time}\n"
     )
-    (common.INPUTS / "era5_grid_summary.txt").write_text(summary)
+    (XAVER.inputs_dir / "era5_grid_summary.txt").write_text(summary)
     print(summary)
     return ds
 

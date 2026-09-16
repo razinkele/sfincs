@@ -6,6 +6,8 @@ import xarray as xr
 import common
 from prep import fetch_gtsm as fg
 
+XAVER = common.EVENTS["xaver_2013"]
+
 
 def _fake_gtsm_file(path, lons, lats, start="2013-11-01", hours=48, offset=0.0):
     t = pd.date_range(start, periods=hours, freq="h")
@@ -33,7 +35,7 @@ def test_nearest_station_and_hourly_series(tmp_path):
 
 @pytest.mark.integration
 def test_real_gtsm_csv_covers_the_event():
-    csv = common.INPUTS / "gtsm_klaipeda.csv"
+    csv = XAVER.inputs_dir / "gtsm_klaipeda.csv"
     if not csv.exists():
         pytest.skip("run prep.fetch_gtsm first")
     s = pd.read_csv(csv, index_col=0, parse_dates=True)["waterlevel_m"]
