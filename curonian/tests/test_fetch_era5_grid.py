@@ -8,16 +8,17 @@ import common
 from prep import fetch_era5_grid as feg
 
 XAVER = common.EVENTS["xaver_2013"]
+APRIL = common.EVENTS["april_2013"]
 
 
-def _synthetic_raw(extra_hours=6):
+def _synthetic_raw(event=XAVER, extra_hours=6):
     """Synthetic raw-CDS-shaped ERA5 dataset: dims (valid_time, latitude, longitude),
     latitude ascending, longitude ascending, an `expver` per-time coordinate (as real
     new-CDS single-levels downloads carry), values in the physically-valid range, and
-    a time span padded past [TREF-1h, TSTOP+1h] on both ends so slicing has something
-    to cut off."""
-    t0 = common.TREF - pd.Timedelta(hours=1 + extra_hours)
-    t1 = common.TSTOP + pd.Timedelta(hours=1 + extra_hours)
+    a time span padded past [event.tref-1h, event.tstop+1h] on both ends so slicing
+    has something to cut off."""
+    t0 = event.tref - pd.Timedelta(hours=1 + extra_hours)
+    t1 = event.tstop + pd.Timedelta(hours=1 + extra_hours)
     times = pd.date_range(t0, t1, freq="h")
     lat = np.array([54.5, 55.0, 55.5])       # ascending -- to_hydromt must flip to descending
     lon = np.array([20.5, 21.0, 21.5])       # ascending already
@@ -47,9 +48,24 @@ def test_to_hydromt_renames_orients_and_slices():
     x = ds["x"].values
     assert list(y) == sorted(y, reverse=True), "y must be north-up (descending)"
     assert list(x) == sorted(x), "x must be ascending"
-    # padded input hours outside [TREF-1h, TSTOP+1h] must be sliced away
-    assert ds["time"].values.min() == np.datetime64(common.TREF - pd.Timedelta("1h"))
-    assert ds["time"].values.max() == np.datetime64(common.TSTOP + pd.Timedelta("1h"))
+    # padded input hours outside [XAVER.tref-1h, XAVER.tstop+1h] must be sliced away
+    assert ds["time"].values.min() == np.datetime64(XAVER.tref - pd.Timedelta("1h"))
+    assert ds["time"].values.max() == np.datetime64(XAVER.tstop + pd.Timedelta("1h"))
+
+
+def test_to_hydromt_slices_to_a_non_xaver_event():
+    """Xaver's tref/tstop equal common.TREF/TSTOP, so a test that only ever passes
+    XAVER cannot tell a genuinely event-driven slice from one still hardcoded to
+    those module constants. April's window is nowhere near November/December, so
+    this only passes if to_hydromt actually reads event.tref/event.tstop."""
+    ds = feg.to_hydromt(_synthetic_raw(APRIL), APRIL)
+    assert ds["time"].values.min() == np.datetime64(APRIL.tref - pd.Timedelta("1h"))
+    assert ds["time"].values.max() == np.datetime64(APRIL.tstop + pd.Timedelta("1h"))
+
+
+def test_era5_request_months_come_from_the_event():
+    assert feg.request(common.event("xaver_2013"))["month"] == ["11", "12"]
+    assert feg.request(common.event("april_2013"))["month"] == ["04", "05"]
 
 
 def test_to_hydromt_raises_on_nan():
