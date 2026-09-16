@@ -419,3 +419,14 @@ def test_criteria_dispatches_april_to_april_criteria(synth_run_dir):
     obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
     got = va.criteria(_april_his(), obs, synth_run_dir, window=SYNTH_WINDOW, event=APRIL)
     assert got[0]["name"].startswith("A1")
+
+
+@pytest.mark.integration
+def test_a5_reports_na_on_a_window_without_uplands(lowland_run_dir):
+    """Mirrors test_criteria_c4_reports_na_on_a_window_without_uplands: A5 reuses
+    C4's logic including its no-uplands value guard, not just its verdict."""
+    obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
+    crit = va.april_criteria(_april_his(), obs, lowland_run_dir, SYNTH_WINDOW)
+    a5 = next(c for c in crit if c["name"].startswith("A5"))
+    assert a5["verdict"] == "n/a"
+    assert "no land above 3 m" in a5["value"]
