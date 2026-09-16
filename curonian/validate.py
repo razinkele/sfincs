@@ -253,6 +253,11 @@ def xaver_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.
 APRIL_CREST = (pd.Timestamp("2013-04-22"), pd.Timestamp("2013-04-26"))
 APRIL_FILL_LEVEL = 0.20      # m; the rising limb crosses it at 10-18 cm/day
 PLATEAU_TIE_M = 0.05         # daily gauge readings this close are the same crest
+# A4's no-skill bar. Fixed and reproducible rather than derived from the observed
+# sd, but only a real test of skill while that sd exceeds it -- today's Klaipeda
+# sd is ~0.089 m, clearing this by just 4 mm. See A4's block below for what
+# happens if that margin is ever lost.
+A4_RMSE_MAX = 0.085          # m
 
 
 def _first_crossing(s: pd.Series, level: float) -> pd.Timestamp:
@@ -279,20 +284,34 @@ def april_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path | None = 
                 "threshold": "peak err within +/-0.15 m",
                 "verdict": "met" if abs(s["peak_err_m"]) <= 0.15 else "not met"})
 
-    # A2a: filling rate. The rise is resolved by the daily readings; the crest is not.
-    obs_cross = _first_crossing(obs_u, APRIL_FILL_LEVEL)
+    # A2a: filling rate. The daily record resolves this crossing only by
+    # interpolation across a limb rising 10-18 cm/day: the next daily READING at or
+    # above the level lags the true (interpolated) crossing by up to a day (19 Apr
+    # reads 0.19 m, 1 cm below the level, so the raw reading-based reference was
+    # 20 Apr 06:00 while the physically real crossing is ~19 Apr 08:00 -- 22 h
+    # earlier, enough to invert which models this criterion accepts). Interpolate
+    # the gauge onto an hourly grid before finding the crossing, so the reference
+    # is the crossing itself, not whichever daily reading happens to land after it.
+    obs_hourly = obs_u.reindex(pd.date_range(obs_u.index.min(), obs_u.index.max(), freq="h")).interpolate(method="time")
+    obs_cross = _first_crossing(obs_hourly, APRIL_FILL_LEVEL)
     mod_cross = _first_crossing(mod_u, APRIL_FILL_LEVEL)
-    dt_h = (mod_cross - obs_cross).total_seconds() / 3600 if pd.notna(mod_cross) else float("nan")
+    both_cross = pd.notna(mod_cross) and pd.notna(obs_cross)
+    dt_h = (mod_cross - obs_cross).total_seconds() / 3600 if both_cross else float("nan")
     out.append({"name": "A2a filling rate", "window": f"first crossing of +{APRIL_FILL_LEVEL:.2f} m",
-                "value": (f"model {mod_cross:%Y-%m-%d %H:%M} vs gauge {obs_cross:%Y-%m-%d %H:%M}, "
-                          f"dt {dt_h:+.0f} h" if pd.notna(mod_cross) else "model never reached the level"),
+                "value": (f"model {mod_cross:%Y-%m-%d %H:%M} vs gauge (interpolated) {obs_cross:%Y-%m-%d %H:%M}, "
+                          f"dt {dt_h:+.0f} h" if both_cross else "model or gauge never reached the level"),
                 "threshold": "within +/-24 h of the observed crossing",
-                "verdict": "met" if pd.notna(mod_cross) and abs(dt_h) <= 24 else "not met"})
+                "verdict": "met" if both_cross and abs(dt_h) <= 24 else "not met"})
 
     # A2b: the crest, accepted anywhere in the observed plateau widened by 12 h.
+    # Uses skill()'s tie-aware peak_time (already computed for A1 above), not a
+    # plain idxmax: for a model whose own crest is a broad plateau -- exactly the
+    # shape this criterion exists to accommodate -- idxmax reports the plateau's
+    # leading edge and can push the verdict to "not met" where the plateau centre
+    # sits inside the band (see skill()'s own comment on the same aliasing).
     plateau = obs_u[obs_u >= obs_u.max() - PLATEAU_TIE_M].index
     p0, p1 = plateau.min() - pd.Timedelta("12h"), plateau.max() + pd.Timedelta("12h")
-    t_peak = mod_u.idxmax()
+    t_peak = s["peak_time"]
     out.append({"name": "A2b crest timing", "window": f"{_fmt_dt(p0)} to {_fmt_dt(p1)}",
                 "value": f"model peak {t_peak:%Y-%m-%d %H:%M}; observed plateau "
                          f"{plateau.min():%d %b}-{plateau.max():%d %b}",
@@ -303,23 +322,40 @@ def april_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path | None = 
     # on the calendar date (not the exact timestamp) so the 26th's 06:00 reading is
     # included along with 22-25's -- the window is a set of days, not a half-open
     # instant range, and excluding the last day would silently narrow the average
-    # the comment above describes.
+    # the comment above describes. An empty `stamps` (no gauge readings at all in
+    # the crest window) has nothing to measure -- c4_verdict's "n/a" ruling applies
+    # here too, not a "not met" that would misreport a data gap as a model failure.
     stamps = [t for t in obs_u.index if APRIL_CREST[0] <= t.normalize() <= APRIL_CREST[1] and t in obs_k.index]
-    obs_head = float(np.mean([obs_u[t] - obs_k[t] for t in stamps]))
-    mod_head = float(np.mean([his["Uostadvaris"].loc[t] - his["Klaipeda"].loc[t] for t in stamps]))
+    if stamps:
+        obs_head = float(np.mean([obs_u[t] - obs_k[t] for t in stamps]))
+        mod_head = float(np.mean([his["Uostadvaris"].loc[t] - his["Klaipeda"].loc[t] for t in stamps]))
+        value3 = (f"model {mod_head:.2f} m vs gauge {obs_head:.2f} m over {len(stamps)} readings, "
+                  f"err {mod_head - obs_head:+.2f} m")
+        verdict3 = "met" if abs(mod_head - obs_head) <= 0.15 else "not met"
+    else:
+        value3 = "no gauge readings in the crest window, nothing to measure"
+        verdict3 = "n/a"
     out.append({"name": "A3 delta-to-sea head", "window": _window_label(APRIL_CREST),
-                "value": f"model {mod_head:.2f} m vs gauge {obs_head:.2f} m over {len(stamps)} readings, "
-                         f"err {mod_head - obs_head:+.2f} m",
-                "threshold": "mean head within +/-0.15 m",
-                "verdict": "met" if abs(mod_head - obs_head) <= 0.15 else "not met"})
+                "value": value3, "threshold": "mean head within +/-0.15 m", "verdict": verdict3})
 
-    # A4: the sea must beat the no-skill baseline, not merely sit near the mean.
+    # A4: the sea must beat the no-skill baseline (A4_RMSE_MAX, above), not merely
+    # sit near the mean. If sigma ever fell to or below that threshold, a flat,
+    # no-skill series would clear the RMSE bar too, and reporting "met" would
+    # claim a no-skill test that was no longer actually being performed. Report
+    # "n/a" instead of a false "met".
     s4 = skill(his["Klaipeda"], obs_k)
     sigma = float(obs_k.std(ddof=0))
+    if sigma <= A4_RMSE_MAX:
+        verdict4 = "n/a"
+        threshold4 = (f"RMSE <= {A4_RMSE_MAX:.3f} m -- not a real test here: the observed sd "
+                      f"({sigma:.3f} m) no longer exceeds this, so a flat series would pass too")
+    else:
+        verdict4 = "met" if s4["rmse"] <= A4_RMSE_MAX else "not met"
+        threshold4 = f"RMSE <= {A4_RMSE_MAX:.3f} m (below the observed sd of {sigma:.3f} m: a flat series fails)"
     out.append({"name": "A4 Klaipeda control", "window": _window_label((lo, hi)),
                 "value": f"RMSE {s4['rmse']:.3f} m against an observed sd of {sigma:.3f} m",
-                "threshold": "RMSE <= 0.085 m (below the observed sd: a flat series fails)",
-                "verdict": "met" if s4["rmse"] <= 0.085 else "not met"})
+                "threshold": threshold4,
+                "verdict": verdict4})
 
     # A5: Xaver's C4, same logic including the no-uplands value guard (see
     # c4_verdict's docstring). Whole-run by construction -- dtmaxout gives one
