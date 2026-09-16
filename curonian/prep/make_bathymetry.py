@@ -12,12 +12,28 @@ import hydromt  # noqa: F401  (registers the `.raster` DataArray accessor)
 import numpy as np
 import xarray as xr
 from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
 import common
 
 NODATA = -9999.0
+
+# North of this northing the lagoon polygon narrows into the Klaipeda strait, measured
+# by width bank to bank:
+#   6170000-6173500   1330-1754 m   lagoon proper
+#   6174000             996 m
+#   6174500             771 m       <- clip here
+#   6175000-6181000    570-725 m    a narrow channel: the strait
+# isobath_points() anchors depth 0 at every shoreline vertex (see its comment below), on
+# purpose: without it the interpolator carries an isobath's depth right up to a bank. At
+# 600-770 m wide, both banks of the strait fall inside each other's anchor radius, so
+# LinearNDInterpolator sees nothing but zeros on either side and returns ~0 m across the
+# whole throat -- an exact-zero bar over the dredged strait channel, at the one place the
+# lagoon can drain. Clipping the polygon used for anchoring here makes this raster
+# nodata north of the cut, so the elevation stack (build_model.DATASETS_DEP) falls back
+# to dem_5m / emodnet_2022 in the strait, exactly as this module's docstring intends.
+STRAIT_CLIP_NORTHING = 6_174_500.0
 
 
 def lagoon_polygon() -> Polygon:
@@ -26,6 +42,21 @@ def lagoon_polygon() -> Polygon:
     parts = list(geom.geoms) if geom.geom_type == "MultiPolygon" else [geom]
     poly = max(parts, key=lambda p: p.area)
     return poly.buffer(0)
+
+
+def bathymetry_polygon() -> Polygon:
+    """lagoon_polygon() clipped south of STRAIT_CLIP_NORTHING (see its comment above).
+
+    A clip local to make_bathymetry, not folded into lagoon_polygon() itself:
+    make_geometries.active_region() also calls lagoon_polygon() and needs the lagoon
+    unclipped there, with the strait supplied separately from channels.geojson.
+    """
+    lagoon = lagoon_polygon()
+    minx, miny, maxx, _ = lagoon.bounds
+    south = lagoon.intersection(box(minx - 1.0, miny - 1.0, maxx + 1.0, STRAIT_CLIP_NORTHING))
+    if south.geom_type == "MultiPolygon":
+        south = max(south.geoms, key=lambda p: p.area)
+    return south
 
 
 def isobath_points(iso: gpd.GeoDataFrame, lagoon: Polygon, spacing: float = 50.0):
@@ -58,7 +89,7 @@ def isobath_points(iso: gpd.GeoDataFrame, lagoon: Polygon, spacing: float = 50.0
 
 
 def make_bathymetry(res: float = 50.0, out: Path = common.INPUTS / "lagoon_bathy_50m.tif") -> Path:
-    lagoon = lagoon_polygon()
+    lagoon = bathymetry_polygon()
     iso = gpd.read_file(common.ISOBATHS, layer=common.ISOBATH_LAYER)
     xy, depth = isobath_points(iso, lagoon)
     assert len(xy) > 1000, f"too few isobath points: {len(xy)}"
