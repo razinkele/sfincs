@@ -9,6 +9,7 @@ logs/
 *.tif
 *.log
 __pycache__/
+.pytest_cache/
 # model run outputs
 curonian/runs/
 !curonian/runs/.gitkeep
