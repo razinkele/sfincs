@@ -71,6 +71,17 @@ Tests: `micromamba run -n hydromt-sfincs python -m pytest tests -q`
 
 ## Results: Xaver 2013
 
+> **Caveat (2026-09-16).** These runs were built over a defect in
+> `lagoon_bathy_50m.tif` that placed a bed at exactly 0.00 m across the
+> Klaipeda strait — see *A ruled-out cause* under **Results: April 2013**.
+> `make_bathymetry` has since been corrected, so the bathymetry that produced
+> the numbers below is no longer what the code generates, and they are not
+> exactly reproducible from the current checkout. They have deliberately not
+> been re-run: the defect restricted outflow, and Xaver is a surge event that
+> pushes water *into* the lagoon, so it is far less sensitive to outflow
+> capacity than a freshet is. Re-running all three variants would be the way
+> to remove the caveat rather than carry it.
+
 Full validation output: `results/xaver_2013/validation.md`,
 `results/xaver_2013/validation_timeseries.png` (time series) and
 `results/xaver_2013/flood_extent_delta.png` (delta flood-extent map).
@@ -295,26 +306,26 @@ Whole period: 2013-04-05 00:00 to 2013-05-02 00:00
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 27 | -0.12 | 0.15 | 0.73 | -0.15 | +19 |
-| Nida | 54 | +0.43 | 0.55 | 0.95 | +0.94 | +78 |
-| Vente | 54 | +0.56 | 0.66 | 0.95 | +1.03 | +120 |
-| Uostadvaris | 27 | +0.36 | 0.47 | 0.90 | +0.78 | +144 |
+| Nida | 54 | +0.45 | 0.60 | 0.95 | +1.05 | +78 |
+| Vente | 54 | +0.58 | 0.70 | 0.95 | +1.14 | +162 |
+| Uostadvaris | 27 | +0.38 | 0.51 | 0.89 | +0.89 | +186 |
 
 Scoring window: 2013-04-13 00:00 to 2013-05-02 00:00
 
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 19 | -0.16 | 0.18 | 0.77 | -0.15 | +19 |
-| Nida | 38 | +0.60 | 0.66 | 0.96 | +0.93 | +72 |
-| Vente | 38 | +0.73 | 0.78 | 0.94 | +1.03 | +120 |
-| Uostadvaris | 19 | +0.48 | 0.55 | 0.81 | +0.78 | +144 |
+| Nida | 38 | +0.64 | 0.71 | 0.95 | +1.04 | +72 |
+| Vente | 38 | +0.77 | 0.82 | 0.94 | +1.13 | +156 |
+| Uostadvaris | 19 | +0.51 | 0.60 | 0.80 | +0.88 | +144 |
 
-Flooded land in the delta window (depth > 5 cm, ground > 0 m): **166.0 km²**
+Flooded land in the delta window (depth > 5 cm, ground > 0 m): **179.8 km²**
 
 ### Success criteria (spec section 9)
-- A1 Uostadvaris peak [2013-04-13 00:00 to 2013-05-02 00:00]: **not met** -- model peak 1.32 m vs gauge 0.54 m, err +0.78 m (threshold: peak err within +/-0.15 m)
-- A2a filling rate [first crossing of +0.20 m]: **not met** -- model 2013-04-15 14:10 vs gauge (interpolated) 2013-04-19 08:00, dt -90 h (threshold: within +/-24 h of the observed crossing)
+- A1 Uostadvaris peak [2013-04-13 00:00 to 2013-05-02 00:00]: **not met** -- model peak 1.43 m vs gauge 0.54 m, err +0.88 m (threshold: peak err within +/-0.15 m)
+- A2a filling rate [first crossing of +0.20 m]: **not met** -- model 2013-04-15 13:50 vs gauge (interpolated) 2013-04-19 08:00, dt -90 h (threshold: within +/-24 h of the observed crossing)
 - A2b crest timing [2013-04-21 18:00 to 2013-04-24 18:00]: **not met** -- model peak 2013-04-30 05:30; observed plateau 22 Apr-24 Apr (threshold: model peak inside the observed plateau +/-12 h)
-- A3 delta-to-sea head [2013-04-22 00:00 to 2013-04-26 00:00]: **not met** -- model 1.16 m vs gauge 0.48 m over 5 readings, err +0.68 m (threshold: mean head within +/-0.15 m)
+- A3 delta-to-sea head [2013-04-22 00:00 to 2013-04-26 00:00]: **not met** -- model 1.20 m vs gauge 0.48 m over 5 readings, err +0.73 m (threshold: mean head within +/-0.15 m)
 - A4 Klaipeda control [2013-04-13 00:00 to 2013-05-02 00:00]: **not met** -- RMSE 0.176 m against an observed sd of 0.089 m (threshold: RMSE <= 0.085 m (below the observed sd of 0.089 m: a flat series fails))
 - A5 Silute uplands [whole run, delta window (325000, 6105000, 360000, 6145000)]: **met** -- 0.00% of land with ground > 3 m flooded (threshold: < 1 % flooded)
 
@@ -422,17 +433,56 @@ readings, 19 h is inside the observation's own resolution).
   the model cannot pass a sustained one through: it fills at close to the
   right rate and shape, then holds most of what it filled with.
 - This mass balance identifies *that* the lagoon does not drain; it does not
-  by itself identify *which* model ingredient is responsible. Three
-  candidates are named here, not concluded from this run: the sea boundary's
-  static calm-window bias correction (spec section 10, limitation 5) accounts
-  for the −0.16 m measured at Klaipeda but not the +0.78 m peak error 42 km
-  inside the lagoon; the Klaipeda strait, hand-digitised at roughly 400 m wide
+  by itself identify *which* model ingredient is responsible. Two candidates
+  remain open, named here rather than concluded: the sea boundary's static
+  calm-window bias correction (spec section 10, limitation 5) accounts for the
+  −0.16 m measured at Klaipeda but not the +0.88 m peak error 42 km inside the
+  lagoon; and the Klaipeda strait, hand-digitised at roughly 400 m wide
   (`../docs/superpowers/specs/2026-09-04-curonian-lagoon-xaver-model-design.md`,
-  section 4) but represented on this model's 100 m grid, may under-resolve
-  the cross-section that actually carries the outflow; and the Juodkrante
-  step above may point at the same conveyance problem sitting further north,
-  in the narrow lagoon rather than the strait itself. None of the three is
-  tested by this run; all three remain open items, unranked.
+  section 4) but represented on this model's 100 m grid, may under-resolve the
+  cross-section that actually carries the outflow. A third candidate — an
+  apparent hydraulic step at Juodkrante — was investigated and ruled out: the
+  station point in `inputs/stations.geojson` sits 1.7 km west of the lagoon
+  shore, on the seaward side of the Curonian Spit, so it reports Baltic sea
+  level rather than a lagoon level. Juodkrante is not one of the four scored
+  gauges, so no criterion is affected, but the point should be moved.
+
+### A ruled-out cause: the bathymetry dam at the strait
+
+Worth recording because it was a real defect, it was fixed, and fixing it did
+**not** resolve the drainage failure — which narrows the search.
+
+`make_bathymetry` anchors depth 0 at every vertex of the lagoon polygon's
+boundary, so that the interpolator does not carry isobath depths up to the
+bank. Where the polygon narrows into the Klaipeda strait it is only 570–770 m
+wide, so both banks are zero-anchored: at (318050, 6179500), 188 of the
+anchors within 600 m were depth 0.0, the nearest 12 m away.
+`LinearNDInterpolator` between all-zero banks returned ~0 depth, and
+`elev = -np.clip(z, 0, 10)` made the bed **exactly 0.00 m** across the neck.
+Because `lagoon_bathy_50m` is first in `build_model.DATASETS_DEP`, that bar
+overrode EMODnet and the DEM at the one place the lagoon can drain.
+
+The fix (`STRAIT_CLIP_NORTHING = 6174500`) clips the polygon this raster
+covers at the measured transition from lagoon (1330–1754 m wide) to strait
+channel (570–725 m), so the strait falls back to EMODnet — which is what this
+module's docstring always said it intended. A regression test pins it.
+
+It worked as a bathymetry change and not at all as a fix. The bar became real
+varying bed (−3.8 to −0.26 m), a formerly inactive cell at x=317950 became
+active and contiguous with the −12 m dredged channel, and throat area now
+grows with stage. But a seed-and-bisect connectivity check returns a
+lagoon-to-sea sill of **+0.02 m both before and after**, and Juodkrante's
+modelled series is identical across the two runs: the lagoon was already
+connected at a low threshold, so the bar was never the binding constraint.
+Re-running the event changed no verdict and moved two the wrong way — A1 from
++0.78 to +0.88 m, A3 from +0.68 to +0.73 m, with the drained fraction falling
+from ~26 % to ~21 %. That ~0.10 m is unexplained and is not attributed here.
+
+The results above are from the corrected bathymetry. **The published Xaver
+results in this file were produced over the old bar** and have not been
+re-run: a surge event is far less sensitive to outflow capacity than a
+freshet, but their numbers are no longer exactly reproducible from the current
+`make_bathymetry`, and that caveat travels with them.
 
 ## Reproducing from a clean checkout
 
