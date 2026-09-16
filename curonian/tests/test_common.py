@@ -92,3 +92,53 @@ def test_write_geojson_trims_coordinates_to_millimetres(tmp_path):
     assert "317168.465" in text
     assert "317168.4651" not in text, "coordinates were not trimmed"
     assert gpd.read_file(out).crs.to_epsg() == CRS_FOR_TEST
+
+
+def test_registry_holds_both_events_keyed_by_name():
+    assert set(common.EVENTS) == {"xaver_2013", "april_2013"}
+    for name, ev in common.EVENTS.items():
+        assert ev.name == name
+
+
+def test_xaver_event_carries_todays_constants_unchanged():
+    ev = common.event("xaver_2013")
+    assert (ev.tref, ev.tstop) == (common.TREF, common.TSTOP)
+    assert ev.calm_window == common.CALM_WINDOW
+    assert ev.minija_q == common.MINIJA_Q_DEC
+    assert ev.data_window == ("2013-11-20", "2013-12-20")   # today's SQL literals
+    assert ev.score_window == (pd.Timestamp("2013-12-05"), pd.Timestamp("2013-12-09"))
+    assert ev.zsini is None                                  # taken from the boundary
+    assert ev.wind_check == (15.0, "the Xaver gale")
+    assert ev.score_label == "Storm window"             # today's report heading
+
+
+def test_april_event_matches_the_spec():
+    ev = common.event("april_2013")
+    assert ev.tref == pd.Timestamp("2013-04-05 00:00")
+    assert ev.tstop == pd.Timestamp("2013-05-02 00:00")
+    assert ev.calm_window == (pd.Timestamp("2013-04-05"), pd.Timestamp("2013-04-11"))
+    assert ev.score_window == (pd.Timestamp("2013-04-13"), pd.Timestamp("2013-05-02"))
+    assert ev.data_window == ("2013-03-26", "2013-05-12")
+    assert ev.gtsm_months == ("04", "05")
+    assert ev.minija_q == common.MINIJA_Q_APR == 83.0
+    assert ev.wind_check is None
+    assert ev.zsini == -0.17
+    assert ev.score_label == "Scoring window"
+
+
+def test_inputs_dir_derives_from_the_name_and_run_dir_does_not():
+    ev = common.event("april_2013")
+    assert ev.inputs_dir == common.INPUTS / "april_2013"
+    assert not hasattr(ev, "run_dir"), (
+        "run directories are keyed by run name, not event name: one event owns "
+        "xaver_2013, xaver_2013_gridwind and xaver_2013_gridwind_pressure")
+
+
+def test_events_are_frozen():
+    with pytest.raises(Exception):
+        common.event("xaver_2013").minija_q = 99.0
+
+
+def test_unknown_event_names_itself_and_the_alternatives():
+    with pytest.raises(KeyError, match="april_2013"):
+        common.event("april2013")
