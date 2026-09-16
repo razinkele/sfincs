@@ -38,7 +38,7 @@ def _synthetic_raw(extra_hours=6):
 
 
 def test_to_hydromt_renames_orients_and_slices():
-    ds = feg.to_hydromt(_synthetic_raw())
+    ds = feg.to_hydromt(_synthetic_raw(), XAVER)
     assert set(ds.data_vars) == {"wind10_u", "wind10_v", "press_msl"}
     assert "expver" not in ds.variables and "number" not in ds.variables
     for v in ds.data_vars:
@@ -56,20 +56,20 @@ def test_to_hydromt_raises_on_nan():
     ds = _synthetic_raw()
     ds["u10"][10, 0, 0] = np.nan
     with pytest.raises(AssertionError):
-        feg.to_hydromt(ds)
+        feg.to_hydromt(ds, XAVER)
 
 
 def test_to_hydromt_raises_on_bad_pressure():
     ds = _synthetic_raw()
     ds["msl"][:, :, :] = 50_000.0   # far below the 90000-110000 Pa sanity range
     with pytest.raises(AssertionError):
-        feg.to_hydromt(ds)
+        feg.to_hydromt(ds, XAVER)
 
 
 def test_to_hydromt_accepts_already_named_time_coordinate():
     """Older-style CDS files use `time` instead of `valid_time`; must pass through unrenamed."""
     ds = _synthetic_raw().rename({"valid_time": "time"})
-    out = feg.to_hydromt(ds)
+    out = feg.to_hydromt(ds, XAVER)
     assert "time" in out.coords
 
 
