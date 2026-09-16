@@ -1,4 +1,5 @@
-"""Assemble the Curonian Lagoon SFINCS model for Storm Xaver with HydroMT-SFINCS 1.2."""
+"""Assemble the Curonian Lagoon SFINCS model for one hindcast event (--event) with
+HydroMT-SFINCS 1.2."""
 from __future__ import annotations
 
 import argparse
