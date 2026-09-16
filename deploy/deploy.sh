@@ -274,7 +274,11 @@ info "HTTP 200 and page content verified"
 FIRST_VARIANT="$(ls "${SFINCS_DATA_DIR}/results" 2>/dev/null | head -1 || true)"
 if [[ -n "$FIRST_VARIANT" ]]; then
     FIG_URL="${PUBLIC_URL}figures/${FIRST_VARIANT}/validation_timeseries.png"
-    read -r FIG_CODE FIG_SIZE < <(curl -sk -o /dev/null -w '%{http_code} %{size_download}' "$FIG_URL" || echo "000 0")
+    # The trailing \n matters: curl -w emits none, so read would hit EOF and
+    # return 1 — which under `set -e` killed the deploy here, after the app was
+    # already installed but before the catalogue was updated. `|| true` guards
+    # the same hazard for any other short read.
+    read -r FIG_CODE FIG_SIZE < <(curl -sk -o /dev/null -w '%{http_code} %{size_download}\n' "$FIG_URL" || echo "000 0") || true
     if [[ "$FIG_CODE" == "200" && "${FIG_SIZE:-0}" -gt 0 ]]; then
         info "figure route verified (${FIG_SIZE} bytes from ${FIRST_VARIANT})"
     else
