@@ -1,7 +1,17 @@
 # Curonian Lagoon SFINCS model
 
-Whole-lagoon compound-flood model, first hindcast Storm Xaver (28 Nov – 11 Dec 2013).
-Design: `../docs/superpowers/specs/2026-09-04-curonian-lagoon-xaver-model-design.md`.
+Whole-lagoon compound-flood model, hindcasting two 2013 events on the same grid,
+bathymetry and channels. Storm Xaver (28 Nov – 11 Dec 2013) is a Baltic surge that
+pushes water into the lagoon through the Klaipeda strait; all three of its forcing
+variants pass their success criteria (see "Results: Xaver 2013" below). The April
+2013 Nemunas freshet (5 Apr – 2 May 2013) is the opposite driver — a slow, large
+river inflow that has to leave through the same strait — and **the hindcast is a
+negative result**: five of its six success criteria are not met, and the mass
+balance shows the model retaining roughly three-quarters of the freshet rather
+than draining it (see "Results: April 2013" below).
+Design: `../docs/superpowers/specs/2026-09-04-curonian-lagoon-xaver-model-design.md`
+(Xaver) and `../docs/superpowers/specs/2026-09-16-april-2013-nemunas-flood-design.md`
+(April).
 
 All commands run from this folder inside the `hydromt-sfincs` env:
 
@@ -13,6 +23,11 @@ All commands run from this folder inside the `hydromt-sfincs` env:
     micromamba run -n hydromt-sfincs python build_model.py
     ../run_sfincs.sh runs/xaver_2013 16
     micromamba run -n hydromt-sfincs python validate.py
+
+    micromamba run -n hydromt-sfincs python -m prep.make_forcing --event april_2013
+    micromamba run -n hydromt-sfincs python build_model.py --event april_2013
+    ../run_sfincs.sh runs/april_2013 16
+    micromamba run -n hydromt-sfincs python validate.py --event april_2013
 
 Tests: `micromamba run -n hydromt-sfincs python -m pytest tests -q`
 
@@ -40,6 +55,19 @@ Tests: `micromamba run -n hydromt-sfincs python -m pytest tests -q`
   load during that run (15-minute load average peaked near 79 on 28 cores), not
   a model change. Every number that moved is recorded below; all four success
   criteria stayed met in all three runs.
+- April 2013 freshet run (`runs/april_2013`, 5 Apr–2 May 2013): build
+  (`build_model.py --event april_2013`) 4 m 41 s, same `check_model()` gate as
+  Xaver (`{'n_active': 331933, 'n_bnd': 70, 'connected': True, 'bnd_in_ring':
+  True}` — same grid, same subgrid, same channels, per the spec). Run 47 m
+  55 s wall clock on 16 threads (SFINCS's own accounting: 2868.652 s total,
+  83.6% in momentum, 14.6% in continuity), mean dt 3.517 s; load average
+  stayed under 1.5 throughout on a 28-core machine. `sfincs.inp` carries
+  `tstart = 20130405 000000`, `tstop = 20130502 000000`,
+  `zsini = -0.17` — the prescribed initial lagoon level (mean of the three
+  lagoon gauges at TREF, not the sea boundary's first value; spec section 7).
+  No `error`/`nan` in the solver log; `sfincs_his.nc` is finite everywhere
+  over the full 5 Apr–2 May time axis. See "Results: April 2013" below for
+  what the run produced.
 
 ## Results: Xaver 2013
 
@@ -251,6 +279,156 @@ not with a real change in timing — this figure is not informative here (see
 with the ERA5 grid's wind over the delta being weaker or differently oriented
 than the Nida point value used everywhere in the baseline, but that mechanism
 was not isolated further and should be read as plausible, not confirmed.
+
+## Results: April 2013
+
+Full validation output: `results/april_2013/validation.md`,
+`results/april_2013/validation_timeseries.png` (time series) and
+`results/april_2013/flood_extent_delta.png` (delta flood-extent map).
+`validate.py --event april_2013` produces `results/april_2013/` itself the same
+way it does for Xaver (it copies its own `validation.md` and both PNGs there
+after writing them to the run folder); nothing under `results/` is copied by
+hand. Tables and verdict lines pasted verbatim below.
+
+Whole period: 2013-04-05 00:00 to 2013-05-02 00:00
+
+| station | n | bias m | RMSE m | r | peak err m | peak dt h |
+|---|---|---|---|---|---|---|
+| Klaipeda | 27 | -0.12 | 0.15 | 0.73 | -0.15 | +19 |
+| Nida | 54 | +0.43 | 0.55 | 0.95 | +0.94 | +78 |
+| Vente | 54 | +0.56 | 0.66 | 0.95 | +1.03 | +120 |
+| Uostadvaris | 27 | +0.36 | 0.47 | 0.90 | +0.78 | +144 |
+
+Scoring window: 2013-04-13 00:00 to 2013-05-02 00:00
+
+| station | n | bias m | RMSE m | r | peak err m | peak dt h |
+|---|---|---|---|---|---|---|
+| Klaipeda | 19 | -0.16 | 0.18 | 0.77 | -0.15 | +19 |
+| Nida | 38 | +0.60 | 0.66 | 0.96 | +0.93 | +72 |
+| Vente | 38 | +0.73 | 0.78 | 0.94 | +1.03 | +120 |
+| Uostadvaris | 19 | +0.48 | 0.55 | 0.81 | +0.78 | +144 |
+
+Flooded land in the delta window (depth > 5 cm, ground > 0 m): **166.0 km²**
+
+### Success criteria (spec section 9)
+- A1 Uostadvaris peak [2013-04-13 00:00 to 2013-05-02 00:00]: **not met** -- model peak 1.32 m vs gauge 0.54 m, err +0.78 m (threshold: peak err within +/-0.15 m)
+- A2a filling rate [first crossing of +0.20 m]: **not met** -- model 2013-04-15 14:10 vs gauge (interpolated) 2013-04-19 08:00, dt -90 h (threshold: within +/-24 h of the observed crossing)
+- A2b crest timing [2013-04-21 18:00 to 2013-04-24 18:00]: **not met** -- model peak 2013-04-30 05:30; observed plateau 22 Apr-24 Apr (threshold: model peak inside the observed plateau +/-12 h)
+- A3 delta-to-sea head [2013-04-22 00:00 to 2013-04-26 00:00]: **not met** -- model 1.16 m vs gauge 0.48 m over 5 readings, err +0.68 m (threshold: mean head within +/-0.15 m)
+- A4 Klaipeda control [2013-04-13 00:00 to 2013-05-02 00:00]: **not met** -- RMSE 0.176 m against an observed sd of 0.089 m (threshold: RMSE <= 0.085 m (below the observed sd of 0.089 m: a flat series fails))
+- A5 Silute uplands [whole run, delta window (325000, 6105000, 360000, 6145000)]: **met** -- 0.00% of land with ground > 3 m flooded (threshold: < 1 % flooded)
+
+Forcing as run (`inputs/april_2013/forcing_summary.txt`): GTSM boundary offset
+−0.212 m (calm window 5–11 Apr 2013), boundary level −0.30 m at the start
+rising to a crest of −0.01 m at 2013-04-25 01:00; wind peak 12.2 m/s at
+2013-04-25 01:00 from 265°; Nemunas discharge 410–2150 m³/s, Minija held
+constant at 83.0 m³/s. The GTSM crest lands 19 h from the Klaipeda 06:00 gauge
+peak (0.15 m at 2013-04-24 06:00) — past the 12 h check tolerance, recorded as
+a FINDING per spec and not treated as a blocker (with only twice-daily gauge
+readings, 19 h is inside the observation's own resolution).
+
+### Findings
+
+- **Five of the six criteria are not met; only A5 (Silute uplands) is met.**
+  The run itself is not in question: `sfincs.inp`'s `tstart`/`tstop` match the
+  event exactly, `sfincs_his.nc` is finite everywhere over the full run with no
+  `error`/`nan` in the solver log (Run log above), and per-station ranges are
+  physically plausible for a river-delta freshet. The failures below are the
+  scored outcome of a valid run, not a symptom of a broken one.
+- A4 (Klaipeda control) is the criterion the spec itself flagged in advance as
+  "the criterion most likely to fail for reasons outside the lagoon" (spec
+  section 10, limitation 5), and it did: RMSE 0.176 m, scoring-window bias
+  −0.16 m, against a 0.085 m threshold. The sea boundary is bias-corrected
+  once, over the calm window 5–11 April; that static offset does not hold
+  once the freshet raises the real Klaipeda gauge, and the model's Klaipeda
+  station sits only ~2 km inside the boundary ring, so it inherits the
+  boundary's own drift almost 1:1.
+- A1 and A3 confirm the *direction* that mechanism predicts — too high — but
+  not its *size*. A common ~0.16 m boundary drift could inflate the
+  Uostadvaris-minus-Klaipeda head by at most about 0.16 m; A3's actual error
+  is +0.68 m (model 1.16 m vs gauge 0.48 m), and A1's peak error is +0.78 m
+  (model 1.32 m vs gauge 0.54 m) at Uostadvaris itself, 42 km inside the ring
+  where Klaipeda is 2 km. The boundary bias is real and measured, but it is
+  not the dominant error.
+- **The dominant error is a mass balance: the modelled lagoon does not
+  drain.** Integrating the Nemunas + Minija discharge series
+  (`inputs/april_2013/dis.csv`) over the whole run (5 Apr–2 May) gives a
+  total inflow of about 3.18×10⁹ m³:
+
+  ```
+  total inflow over the run           3.18e9 m³
+    ÷ lagoon area (1584 km², nominal) =  2.01 m   rise if nothing drained
+  modelled rise (−0.17 → 1.32 m)          1.49 m   → only ~26 % of the inflow left the lagoon
+  observed (Uostadvaris)                  peaked 0.54 m, receded to 0.10 m by 2 May
+  ```
+
+  Spread over the lagoon's nominal 1584 km² surface (not a model-derived
+  quantity), that inflow would raise the whole lagoon about 2.01 m if none of
+  it drained. The model's own Uostadvaris peak rises 1.49 m over the run
+  (from `zsini = -0.17` m to its modelled 1.32 m peak) — so on this simple
+  balance only about a quarter of the freshet's volume left through the
+  strait; the rest stayed in the lagoon. The real lagoon did the opposite:
+  Uostadvaris peaked at 0.54 m and had receded to 0.10 m by 2 May, passing
+  essentially all of it through.
+- Two signatures corroborate the mass-balance arithmetic independently.
+  (1) By the end of the run Uostadvaris, Nida and Vente sit within 0.003 m of
+  each other — 1.314 m, 1.317 m and 1.314 m respectively at 2013-05-02 00:00
+  (`sfincs_his.nc`) — even though the observed event holds an 0.18 m gradient
+  across exactly these three gauges at their own peaks (Uostadvaris 0.54 m,
+  Nida 0.36 m, Ventė 0.29 m; spec section 2). A sustained river inflow should
+  leave a head from the delta down to the strait; the model erases it instead
+  of reproducing it. (2) The peak lag grows with distance from the strait —
+  Nida +72 h, Vente +120 h, Uostadvaris +144 h (scoring-window table above) —
+  consistent with water working its way in faster than it can work its way
+  back out.
+- A third, unresolved observation sits alongside those two rather than inside
+  them: Juodkrante, a model output point roughly midway between Klaipeda and
+  Nida (moved into a wet cell during the Xaver build; see Run log), tracks
+  close to sea level all the way through the run — start −0.17 m, a brief
+  peak of only +0.07 m on 27 April, end −0.19 m — while Nida, further south
+  on the same spit, rises to +1.32 m. Essentially all of the modelled rise
+  happens south of Juodkrante rather than building gradually across the
+  northern lagoon; the model's internal gradient is a step near Juodkrante,
+  not the smooth basin-wide picture the delta-gauge convergence above might
+  suggest on its own. Whether that step is a real conveyance restriction in
+  the narrow northern lagoon or a Juodkrante siting artefact is not resolved
+  here.
+- Correlation is 0.81–0.96 at the three lagoon gauges over the scoring window
+  (Klaipeda 0.77) — the model reproduces the *shape* of the event, in
+  particular the rise, closely, and gets its *throughput* wrong: A2a shows
+  the model crossing +0.20 m 90 h too early (it fills fast), while A2b shows
+  its actual peak arriving 144 h too late, well outside the observed
+  22–24 April plateau (it does not turn over with the gauges once full).
+- The excess is not confined to the scored window. 5–13 April is unscored
+  spin-up — the delta gauge itself is ice-affected through 12 April (spec
+  section 3), so the modelled and observed series are not directly
+  comparable there — but within that window the modelled Uostadvaris level
+  rises from −0.17 m at `tstart` to about +0.14 m by 13 April (`sfincs_his.nc`;
+  the daily mean climbs on every one of the eight days, not a single noisy
+  swing), while Nemunas discharge in the forcing is still at or near its
+  ~410–532 m³/s pre-event baseline (spec section 2). A lagoon drifting away
+  from its prescribed initial level under near-baseline inflow is consistent
+  with the same outflow restriction identified above, though not established
+  by this alone.
+- **Interpretation.** Storm Xaver is a 13-day surge that pushes water into
+  the lagoon; it never tested the strait's capacity to let water back out —
+  that conveyance was assumed in the shared geometry, not validated by either
+  event run so far. The April freshet is the opposite driver, a large,
+  sustained river inflow that the lagoon must pass back out to the sea, and
+  the model cannot pass a sustained one through: it fills at close to the
+  right rate and shape, then holds most of what it filled with.
+- This mass balance identifies *that* the lagoon does not drain; it does not
+  by itself identify *which* model ingredient is responsible. Three
+  candidates are named here, not concluded from this run: the sea boundary's
+  static calm-window bias correction (spec section 10, limitation 5) accounts
+  for the −0.16 m measured at Klaipeda but not the +0.78 m peak error 42 km
+  inside the lagoon; the Klaipeda strait, hand-digitised at roughly 400 m wide
+  (`../docs/superpowers/specs/2026-09-04-curonian-lagoon-xaver-model-design.md`,
+  section 4) but represented on this model's 100 m grid, may under-resolve
+  the cross-section that actually carries the outflow; and the Juodkrante
+  step above may point at the same conveyance problem sitting further north,
+  in the narrow lagoon rather than the strait itself. None of the three is
+  tested by this run; all three remain open items, unranked.
 
 ## Reproducing from a clean checkout
 

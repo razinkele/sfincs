@@ -39,6 +39,7 @@ VARIANT_LABELS = {
     "xaver_2013": "Xaver 2013 — uniform wind",
     "xaver_2013_gridwind": "Xaver 2013 — ERA5 gridded wind",
     "xaver_2013_gridwind_pressure": "Xaver 2013 — ERA5 wind + pressure",
+    "april_2013": "April 2013 — Nemunas freshet",
 }
 
 
@@ -74,7 +75,10 @@ _CRITERION_RE = re.compile(
     r"\*\*(?P<verdict>.+?)\*\*\s*--\s*(?P<detail>.*)$"
 )
 _FLOODED_RE = re.compile(r"Flooded land[^:]*:\s*\*\*([\d.]+)\s*km")
-_PERIOD_RE = re.compile(r"^(Whole period|Storm window):\s*(.+)$")
+# Xaver's report says "Storm window"; April's says "Scoring window". Both are the
+# event's scored sub-window, so the parser accepts either and the UI calls it what
+# the report calls it.
+_PERIOD_RE = re.compile(r"^(Whole period|Storm window|Scoring window):\s*(.+)$")
 
 
 @lru_cache(maxsize=32)
@@ -112,6 +116,11 @@ def periods(variant: str) -> dict[str, str]:
         if m:
             found[m.group(1)] = m.group(2)
     return found
+
+
+def scored_window_name(variant: str) -> str:
+    """The report's own name for its scored sub-window, for labels and lookups."""
+    return next((k for k in periods(variant) if k != "Whole period"), "Scoring window")
 
 
 def _is_rule(cells: list[str]) -> bool:
