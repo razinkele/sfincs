@@ -5,6 +5,9 @@ import pytest
 import common
 from prep import make_forcing as mf
 
+APRIL = common.event("april_2013")
+XAVER = common.event("xaver_2013")
+
 
 def test_bias_correct_aligns_calm_window_means():
     t = pd.date_range("2013-11-27", "2013-12-10", freq="h")
@@ -19,7 +22,7 @@ def test_bias_correct_aligns_calm_window_means():
 def test_boundary_forcing_covers_period_on_all_points():
     t = pd.date_range("2013-11-27", "2013-12-12", freq="h")
     gtsm = pd.Series(np.linspace(0, 1, len(t)), index=t)
-    df = mf.boundary_forcing(gtsm, npoints=7)
+    df = mf.boundary_forcing(gtsm, npoints=7, event=XAVER)
     assert list(df.columns) == list(range(1, 8))
     assert df.index[0] == common.TREF and df.index[-1] == common.TSTOP
     assert (df.nunique(axis=1) == 1).all() and df.notna().all().all()
@@ -43,9 +46,9 @@ def test_nemunas_lag_and_hourly_interpolation():
 
 @pytest.mark.integration
 def test_real_gauges_and_discharge():
-    obs = mf.load_gauge_levels("Uostadvaris")
+    obs = mf.load_gauge_levels("Uostadvaris", XAVER)
     assert abs(obs.loc["2013-12-06 06:00"] - 0.92) < 1e-9
-    q = mf.discharge_forcing()
+    q = mf.discharge_forcing(XAVER)
     assert q.index[0] == common.TREF and q.index[-1] == common.TSTOP
     assert 350 < q[1].loc["2013-12-01":"2013-12-05"].mean() < 600 and (q[2] == common.MINIJA_Q_DEC).all()
 
@@ -76,4 +79,44 @@ def test_boundary_forcing_raises_when_the_period_cannot_be_filled():
     """
     outside = pd.date_range("2014-06-01", periods=48, freq="h")      # nowhere near the run period
     with pytest.raises(ValueError, match="boundary"):
-        mf.boundary_forcing(pd.Series(np.nan, index=outside), npoints=7)
+        mf.boundary_forcing(pd.Series(np.nan, index=outside), npoints=7, event=XAVER)
+
+
+@pytest.mark.parametrize("ev", [XAVER, APRIL], ids=lambda e: e.name)
+def test_boundary_forcing_spans_whichever_event_it_is_given(ev):
+    t = pd.date_range(ev.tref - pd.Timedelta("1D"), ev.tstop + pd.Timedelta("1D"), freq="h")
+    gtsm = pd.Series(np.linspace(0, 1, len(t)), index=t)
+    df = mf.boundary_forcing(gtsm, npoints=7, event=ev)
+    assert df.index[0] == ev.tref and df.index[-1] == ev.tstop
+    assert df.notna().all().all()
+
+
+def test_wind_check_none_skips_the_peak_assertion_but_not_the_span_guard():
+    """April has no gale to assert -- but an empty slice must still fail loudly."""
+    t = pd.date_range(APRIL.tref - pd.Timedelta("1h"), APRIL.tstop + pd.Timedelta("1h"), freq="h")
+    calm = pd.DataFrame({"mag": 5.0, "dir": 180.0}, index=t)
+    mf.check_wind(calm, APRIL)                      # no raise: wind_check is None
+
+    with pytest.raises(ValueError, match="does not cover"):
+        mf.check_wind(calm.iloc[:10], APRIL)        # truncated -> raises anyway
+
+
+def test_wind_check_still_demands_the_gale_for_xaver():
+    t = pd.date_range(XAVER.tref - pd.Timedelta("1h"), XAVER.tstop + pd.Timedelta("1h"), freq="h")
+    calm = pd.DataFrame({"mag": 5.0, "dir": 180.0}, index=t)
+    with pytest.raises(ValueError, match="Xaver gale"):
+        mf.check_wind(calm, XAVER)
+
+
+@pytest.mark.integration
+def test_april_discharge_carries_the_freshet_and_its_own_minija():
+    q = mf.discharge_forcing(APRIL)
+    assert q.index[0] == APRIL.tref and q.index[-1] == APRIL.tstop
+    assert 2000 < q[1].loc["2013-04-19":"2013-04-21"].max() < 2300      # the crest
+    assert (q[2] == common.MINIJA_Q_APR).all()
+
+
+@pytest.mark.integration
+def test_april_gauge_levels_reach_the_observed_crest():
+    obs = mf.load_gauge_levels("Uostadvaris", APRIL)
+    assert abs(obs.loc["2013-04-24 06:00"] - 0.54) < 1e-9

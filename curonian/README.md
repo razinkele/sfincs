@@ -9,7 +9,7 @@ All commands run from this folder inside the `hydromt-sfincs` env:
     micromamba run -n hydromt-sfincs python -m prep.make_channels
     micromamba run -n hydromt-sfincs python -m prep.make_geometries
     micromamba run -n hydromt-sfincs python -m prep.fetch_gtsm
-    micromamba run -n hydromt-sfincs python -m prep.make_forcing
+    micromamba run -n hydromt-sfincs python -m prep.make_forcing --event xaver_2013
     micromamba run -n hydromt-sfincs python build_model.py
     ../run_sfincs.sh runs/xaver_2013 16
     micromamba run -n hydromt-sfincs python validate.py
@@ -289,7 +289,7 @@ Build and run, from this folder inside the `hydromt-sfincs` env:
     micromamba run -n hydromt-sfincs python -m prep.make_channels
     micromamba run -n hydromt-sfincs python -m prep.make_geometries
     micromamba run -n hydromt-sfincs python -m prep.fetch_gtsm
-    micromamba run -n hydromt-sfincs python -m prep.make_forcing
+    micromamba run -n hydromt-sfincs python -m prep.make_forcing --event xaver_2013
     micromamba run -n hydromt-sfincs python build_model.py
     ../run_sfincs.sh runs/xaver_2013 16
     micromamba run -n hydromt-sfincs python validate.py
