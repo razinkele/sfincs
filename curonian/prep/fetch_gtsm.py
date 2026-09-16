@@ -14,6 +14,8 @@ import xarray as xr
 
 import common
 
+XAVER = common.EVENTS["xaver_2013"]
+
 DATASET = "sis-water-level-change-timeseries-cmip6"
 REQUEST = {
     "variable": ["total_water_level"],
@@ -32,7 +34,7 @@ LON_NAMES = ("station_x_coordinate", "lon", "longitude")
 LAT_NAMES = ("station_y_coordinate", "lat", "latitude")
 
 
-def download(target: Path = common.INPUTS / "gtsm_2013_11_12.zip") -> Path:
+def download(target: Path = XAVER.inputs_dir / "gtsm.zip") -> Path:
     import cdsapi
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.stat().st_size > 1_000_000:
@@ -93,7 +95,7 @@ def extract_nearest(zip_path: Path, lonlat=common.KLAIPEDA_MOUTH_LONLAT):
     return series_from_files([outdir / n for n in names], lonlat)
 
 
-def main(out: Path = common.INPUTS / "gtsm_klaipeda.csv") -> pd.Series:
+def main(out: Path = XAVER.inputs_dir / "gtsm_klaipeda.csv") -> pd.Series:
     zip_path = download()
     series, meta = extract_nearest(zip_path)
     if meta["distance_km"] >= 60:

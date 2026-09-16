@@ -14,6 +14,8 @@ import common
 NEMUNAS_APEX_LONLAT = (21.38, 55.30)   # Rusnė, where the Nemunas splits into Atmata and Skirvytė
 MINIJA_MOUTH_LONLAT = (21.25, 55.42)
 
+XAVER = common.EVENTS["xaver_2013"]
+
 
 def load_gauge_levels(site: str) -> pd.Series:
     df = common.read_table(
@@ -111,7 +113,7 @@ def main(inputs: Path = common.INPUTS, use_cmems: bool = False) -> None:
         gtsm = cmems_daily_boundary()
         print("using the daily CMEMS cache as sea boundary (fallback)")
     else:
-        gtsm = pd.read_csv(inputs / "gtsm_klaipeda.csv", index_col=0, parse_dates=True)["waterlevel_m"]
+        gtsm = pd.read_csv(XAVER.inputs_dir / "gtsm_klaipeda.csv", index_col=0, parse_dates=True)["waterlevel_m"]
     # Spec section 5 checks the boundary against the Klaipeda 06:00 series only; restrict
     # here even though load_gauge_levels("Klaipeda") currently returns only 06:00 readings
     # anyway (no wlevel_18 rows exist for this site).
@@ -120,13 +122,13 @@ def main(inputs: Path = common.INPUTS, use_cmems: bool = False) -> None:
     corrected, offset = bias_correct(gtsm, klaipeda_06, common.CALM_WINDOW)
     bnd_pts = gpd.read_file(inputs / "boundary_points.geojson")
     bzs = boundary_forcing(corrected, len(bnd_pts))
-    bzs.to_csv(inputs / "bzs.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
+    bzs.to_csv(XAVER.inputs_dir / "bzs.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
 
     wind = wind_forcing()
-    wind.to_csv(inputs / "wind.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
+    wind.to_csv(XAVER.inputs_dir / "wind.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
 
     dis = discharge_forcing()
-    dis.to_csv(inputs / "dis.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
+    dis.to_csv(XAVER.inputs_dir / "dis.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
     common.write_geojson(discharge_points(), inputs / "dis_points.geojson")
 
     storm = corrected.loc["2013-12-05":"2013-12-08"]
@@ -139,7 +141,7 @@ def main(inputs: Path = common.INPUTS, use_cmems: bool = False) -> None:
     if gap > pd.Timedelta("12h"):
         summary += (f"FINDING: GTSM storm peak ({storm.idxmax()}) is {gap} from the Klaipeda 06:00 gauge peak "
                     f"({klaipeda_06.idxmax()}) -- more than the 12 h check tolerance. Not a blocker: recorded per spec.\n")
-    (inputs / "forcing_summary.txt").write_text(summary)
+    (XAVER.inputs_dir / "forcing_summary.txt").write_text(summary)
     print(summary)
 
 

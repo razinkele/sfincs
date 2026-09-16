@@ -14,7 +14,8 @@ __pycache__/
 curonian/runs/
 !curonian/runs/.gitkeep
 curonian/inputs/*.zip
-curonian/inputs/gtsm_2013_11_12/
+curonian/inputs/*/*.zip
+curonian/inputs/*/gtsm/
 curonian/inputs/*.nc
 curonian/inputs/*.tif
 test_model*/sfincs_log.txt
