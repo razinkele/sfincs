@@ -179,7 +179,9 @@ def test_burned_channels_lie_on_active_cells():
         pts = list(geom.segmentize(common.DX).coords)
         n_inactive = sum(1 for x, y in pts if common.mask_value_at(msk, xs, ys, x, y) == 0)
         frac = n_inactive / len(pts)
-        if frac > 0.05:
+        # Tight on purpose: at ~100 m spacing even 1% is a real ~100+ m throttle in a
+        # channel this narrow, and all three committed channels currently score 0%.
+        if frac > 0.01:
             bad[name] = (n_inactive, len(pts), frac)
     assert not bad, (
         "channel centreline(s) fall mostly on inactive cells, so their burn would "
