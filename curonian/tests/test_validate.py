@@ -354,19 +354,26 @@ def test_criteria_raises_rather_than_scoring_with_the_wrong_events_rules(synth_r
 # april_criteria() -- spec section 8 success criteria for the April freshet
 # ---------------------------------------------------------------------------
 
-def _april_his(peak_day="2013-04-24", cross_day="2013-04-20", head=0.48, peak=0.54):
+def _april_his(peak_day="2013-04-24", cross_day="2013-04-20", head=0.48, peak=0.54, klaipeda=None):
     """Synthetic hourly model output that passes every April criterion.
 
     `peak` defaults to the real observed Uostadvaris crest (0.54 m) so A1 comes
     back "met" by construction; sabotage tests override it to move only the
     peak's *height*, independent of `peak_day` (its timing) and `cross_day`
     (the filling rate) -- each parameter isolates a single criterion.
+
+    `klaipeda` overrides the Klaipeda column outright (reindexed onto this
+    function's hourly index): by default it is `u - head`, a deterministic
+    function of the river signal that can never demonstrate A4 "met", since it
+    carries no independent sea variability. Tests that need A4 to flip in
+    either direction supply a real or a flat Klaipeda series instead.
     """
     t = pd.date_range("2013-04-05", "2013-05-02", freq="h")
     u = pd.Series(np.interp(t.asi8,
         pd.to_datetime(["2013-04-05", cross_day, peak_day, "2013-05-02"]).asi8,
         [-0.13, 0.20, peak, 0.30]), index=t)
-    return pd.DataFrame({"Uostadvaris": u, "Klaipeda": u - head,
+    k = klaipeda.reindex(t).interpolate(method="time", limit_direction="both") if klaipeda is not None else u - head
+    return pd.DataFrame({"Uostadvaris": u, "Klaipeda": k,
                          "Nida": u - 0.18, "Vente": u - 0.25}, index=t)
 
 
@@ -377,10 +384,16 @@ def test_april_criteria_pass_on_a_faithful_model(synth_run_dir):
     assert [c["name"][:3] for c in crit] == ["A1 ", "A2a", "A2b", "A3 ", "A4 ", "A5 "]
     for p in ("A1", "A2a", "A2b", "A3"):
         assert _verdict(crit, p) == "met", p
+    a2b = next(c for c in crit if c["name"].startswith("A2b"))
+    assert "22 Apr-24 Apr" in a2b["value"], (
+        "pins the derived plateau to the gauge's actual 22-24 Apr readings, so a "
+        "change in PLATEAU_TIE_M or the database fails loudly instead of "
+        "silently widening or narrowing the acceptance band")
     # A4 is not asserted here: the synthetic Klaipeda is a constant offset from the
     # river signal (u - head), not an independent sea record, so it does not clear
     # A4's no-skill-baseline bar even when every river-side criterion passes. That
-    # is a property of this fixture, not a defect in A4 -- see the report.
+    # is a property of this fixture, not a defect in A4 -- see test_a4_met_when_...
+    # and test_a4_not_met_when_... below, which exercise A4 directly.
 
 
 @pytest.mark.integration
@@ -412,6 +425,64 @@ def test_a3_fails_when_the_delta_does_not_stand_above_the_sea(synth_run_dir):
     obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
     crit = va.april_criteria(_april_his(head=0.20), obs, synth_run_dir, SYNTH_WINDOW)
     assert _verdict(crit, "A3") == "not met"
+
+
+@pytest.mark.integration
+def test_a3_reports_na_when_the_crest_window_has_no_gauge_readings(synth_run_dir):
+    """An empty `stamps` (e.g. a gap in the record over 22-26 Apr) has nothing to
+    measure -- c4_verdict's "n/a" ruling applies here too, not a "not met" that
+    would misreport a data gap as a model failure."""
+    obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
+    obs["Uostadvaris"] = obs["Uostadvaris"].drop(obs["Uostadvaris"].loc["2013-04-22":"2013-04-26"].index)
+    crit = va.april_criteria(_april_his(), obs, synth_run_dir, SYNTH_WINDOW)
+    assert _verdict(crit, "A3") == "n/a"
+
+
+@pytest.mark.integration
+def test_a4_met_when_klaipeda_tracks_the_gauge(synth_run_dir):
+    """A4 never flips to "met" under the default fixture (see the faithful test's
+    comment); supplying a Klaipeda series that actually tracks the real gauge
+    shows A4 can pass, and that A1-A3 (which never look at Klaipeda except A3's
+    head) are unaffected."""
+    obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
+    t = pd.date_range("2013-04-05", "2013-05-02", freq="h")
+    k = obs["Klaipeda"].reindex(t).interpolate(method="time", limit_direction="both")
+    crit = va.april_criteria(_april_his(klaipeda=k), obs, synth_run_dir, SYNTH_WINDOW)
+    assert _verdict(crit, "A4") == "met"
+    for p in ("A1", "A2a", "A2b"):
+        assert _verdict(crit, p) == "met", p
+
+
+@pytest.mark.integration
+def test_a4_not_met_when_klaipeda_is_flat(synth_run_dir):
+    """A flat sea series at the window mean carries the observed mean but none of
+    the observed variability -- the definition of failing the no-skill baseline
+    A4 exists to enforce."""
+    obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
+    t = pd.date_range("2013-04-05", "2013-05-02", freq="h")
+    lo, hi = APRIL.score_window
+    # A tiny (1 mm) wobble, not a bare constant -- an exactly flat vector makes
+    # skill()'s corrcoef 0/0 (see _base_his's comment on the same aliasing), which
+    # would print a numpy RuntimeWarning unrelated to what this test is checking.
+    flat = pd.Series(obs["Klaipeda"].loc[lo:hi].mean(), index=t) + 0.001 * np.sin(np.arange(len(t)) / 6.0)
+    crit = va.april_criteria(_april_his(klaipeda=flat), obs, synth_run_dir, SYNTH_WINDOW)
+    assert _verdict(crit, "A4") == "not met"
+
+
+@pytest.mark.integration
+def test_a4_reports_na_when_the_observed_sea_has_gone_quiet(synth_run_dir):
+    """If the window's observed Klaipeda variability ever fell to or below
+    A4_RMSE_MAX, a flat, no-skill series would clear the RMSE bar too -- A4 must
+    say so ("n/a") instead of silently reporting a false "met". Exercises the
+    branch test_a4_met/test_a4_not_met cannot reach, since today's real sigma
+    (~0.089 m) sits just above the threshold."""
+    obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
+    lo, hi = APRIL.score_window
+    quiet = obs["Klaipeda"].loc[lo:hi].copy()
+    quiet[:] = quiet.mean() + 0.01 * np.sin(np.arange(len(quiet)))   # sd well under A4_RMSE_MAX
+    obs["Klaipeda"] = quiet
+    crit = va.april_criteria(_april_his(), obs, synth_run_dir, SYNTH_WINDOW)
+    assert _verdict(crit, "A4") == "n/a"
 
 
 @pytest.mark.integration
