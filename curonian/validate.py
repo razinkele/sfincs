@@ -247,8 +247,9 @@ def xaver_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.
 
 # The crest window A3 averages the delta-to-sea head over. Wider than the peak
 # itself on purpose: the 24 Apr head is depressed by a one-day 20 cm excursion in
-# the Klaipeda gauge (52, 55, 39, 45, 47 cm on 22-26 Apr), so a single instant
-# scores the sea's noise rather than the river's head. See spec section 8.
+# the Klaipeda gauge, which drags the head (Uostadvaris minus Klaipeda) down to
+# 52, 55, 39, 45, 47 cm on 22-26 Apr, so a single instant scores the sea's noise
+# rather than the river's head. See spec section 8.
 APRIL_CREST = (pd.Timestamp("2013-04-22"), pd.Timestamp("2013-04-26"))
 APRIL_FILL_LEVEL = 0.20      # m; the rising limb crosses it at 10-18 cm/day
 PLATEAU_TIE_M = 0.05         # daily gauge readings this close are the same crest
@@ -320,14 +321,17 @@ def april_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path | None = 
                 "threshold": "RMSE <= 0.085 m (below the observed sd: a flat series fails)",
                 "verdict": "met" if s4["rmse"] <= 0.085 else "not met"})
 
-    # A5: Xaver's C4 verbatim. Whole-run by construction -- dtmaxout gives one zsmax
-    # record spanning tstart..tstop, so this cannot be restricted to the scoring window.
+    # A5: Xaver's C4, same logic including the no-uplands value guard (see
+    # c4_verdict's docstring). Whole-run by construction -- dtmaxout gives one
+    # zsmax record spanning tstart..tstop, so this cannot be restricted to the
+    # scoring window.
     ground, flooded, _, _, _, _ = _flood_arrays(run_dir, window)
     uplands = np.isfinite(ground) & (ground > 3.0)
     n_upland_px = int(uplands.sum())
     frac_pct = (100.0 * float(flooded[uplands].sum()) / n_upland_px) if n_upland_px else float("nan")
     out.append({"name": "A5 Silute uplands", "window": f"whole run, delta window {window}",
-                "value": f"{frac_pct:.2f}% of land with ground > 3 m flooded",
+                "value": (f"{frac_pct:.2f}% of land with ground > 3 m flooded" if n_upland_px
+                          else "no land above 3 m in this window, nothing to measure"),
                 "threshold": "< 1 % flooded",
                 "verdict": c4_verdict(frac_pct, n_upland_px)})
     return out
