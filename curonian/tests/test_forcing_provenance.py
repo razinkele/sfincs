@@ -92,10 +92,20 @@ def test_the_lag_is_applied_in_the_right_direction(event):
 
     This is the regression the value check alone cannot catch: Nemunas discharge
     changes slowly, so shifting it a day still gives numbers of the right size.
+
+    Scoped exactly like test_discharge_forcing_reproduces_lhmt_with_the_documented_lag:
+    restricted to midnights whose *correctly-lagged* source day is at or after
+    KNOWN_STALE_BEFORE[event.name] (April only; a no-op for Xaver). Without this,
+    the six stale April spin-up days can never match the fixture under any lag, so
+    same_day/wrong_way could never reach the un-scoped n and both assertions below
+    would be unfalsifiable for April -- passing even with no lag applied at all.
     """
     obs, nem = lhmt(event), model(event)[1]
+    stale_before = KNOWN_STALE_BEFORE.get(event.name)
+    midnights = [t for t in _midnights(event)
+                 if stale_before is None or t - pd.Timedelta(days=event.nemunas_lag_days) >= stale_before]
     same_day = wrong_way = 0
-    for t in _midnights(event):
+    for t in midnights:
         for offset, name in ((0, "same_day"), (-event.nemunas_lag_days, "wrong_way")):
             src = t - pd.Timedelta(days=offset)
             if src in obs.index and nem.loc[t] == pytest.approx(obs.loc[src], abs=0.5):
@@ -103,7 +113,7 @@ def test_the_lag_is_applied_in_the_right_direction(event):
                     same_day += 1
                 else:
                     wrong_way += 1
-    n = len(_midnights(event))
+    n = len(midnights)
     assert same_day < n, "dis.csv matches LHMT with NO lag — NEMUNAS_LAG_DAYS is not being applied"
     assert wrong_way < n, "dis.csv matches LHMT with the lag INVERTED"
 
@@ -131,9 +141,11 @@ def test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013():
     """
     event = common.event("april_2013")
     obs = lhmt(event)
+    range_start = event.data_window[0]
+    range_end = (KNOWN_STALE_BEFORE["april_2013"] - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     df = common.read_table(
         "SELECT date, discharge_m3s FROM river_discharge WHERE river='Nemunas' AND gauge='Smalininkai' "
-        "AND date BETWEEN ? AND ?", ("2013-03-26", "2013-04-10"))
+        "AND date BETWEEN ? AND ?", (range_start, range_end))
     db = pd.Series(df["discharge_m3s"].values, index=pd.to_datetime(df["date"]))
 
     compared, max_diff = 0, 0.0
@@ -146,9 +158,17 @@ def test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013():
             f"{day:%Y-%m-%d}: db {q} vs LHMT {obs.loc[day]}, diff {diff} exceeds the known ~53 m3/s gap")
         compared += 1
     assert compared >= 14, f"only {compared} days compared; expected the full 26 Mar-10 Apr stretch"
-    assert max_diff > 1.0, (
-        "the known database/LHMT gap has disappeared -- if the database was refreshed, move "
-        "KNOWN_STALE_BEFORE['april_2013'] back toward tref and update or remove this test")
+    # Pins the *magnitude*, not just the existence, of the gap: an upper bound alone
+    # (diff <= 55.0 above) would stay green if a partial refresh fixed fifteen of the
+    # sixteen days and left one off by a few m3/s -- exactly the silent drift this
+    # test exists to catch. 53.0 is the maximum observed on 2026-09-16 (2013-04-01,
+    # DB 473 vs LHMT 526); +-2.0 is headroom for float/round-trip noise, not for a
+    # real revision. If this fails because the gap shrank or moved, that is the
+    # database being refreshed or LHMT revising again -- update the pin and
+    # KNOWN_STALE_BEFORE deliberately, do not just widen the tolerance.
+    assert max_diff == pytest.approx(53.0, abs=2.0), (
+        f"known database/LHMT gap changed shape: max diff is now {max_diff}, was 53.0 on 2026-09-16 -- "
+        "a human should look before this pin is updated")
 
 
 @pytest.mark.integration
