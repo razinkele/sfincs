@@ -6,7 +6,7 @@ the numbers are the right numbers: its assertion is `350 < mean < 600`, which an
 inverted lag, a different Smalininkai series, or a units slip would all survive.
 
 These tests close that gap by comparing against the authority the data actually
-comes from. The local path is curonian_db.gpkg -> make_forcing -> inputs/dis.csv;
+comes from. The local path is curonian_db.gpkg -> make_forcing -> inputs/<event>/dis.csv;
 the fixture is the same series taken straight from api.meteo.lt.
 """
 from pathlib import Path
@@ -16,37 +16,68 @@ import pytest
 
 import common
 
-XAVER = common.EVENTS["xaver_2013"]
-
-FIXTURE = Path(__file__).parent / "data" / "lhmt_smalininkai_2013.csv"
+FIXTURES = {
+    "xaver_2013": Path(__file__).parent / "data" / "lhmt_smalininkai_2013.csv",
+    "april_2013": Path(__file__).parent / "data" / "lhmt_smalininkai_2013_04.csv",
+}
+PROV_EVENTS = [common.event("xaver_2013"), common.event("april_2013")]
 STATION = "smalininku-vms"
 API = "https://api.meteo.lt/v1"
 
+# curonian_db.gpkg's Smalininkai record for late March/early April 2013 (a single
+# source, source_id 167 throughout -- not a file-boundary artifact) predates LHMT's
+# current published series: checked 2026-09-16 against a fresh api.meteo.lt fetch,
+# it disagrees for every day from 2013-03-26 through 2013-04-10 (up to 53 m3/s, one
+# sign flip in the run), then converges and agrees exactly for 2013-04-11 onward --
+# through the rise, the 19 April crest (2150), the recession and the whole scoring
+# window. Those ten-to-sixteen days are model spin-up, before the flood and outside
+# score_window; from 2 April the gap is at most 17 m3/s on a ~480 m3/s baseline
+# (~3%). Refreshing the shared database is a decision for its owner, not this test
+# suite, so the exact-match check below starts where the two sources actually agree,
+# and test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013 pins the gap
+# itself -- so a database refresh, or a further LHMT revision, is caught rather than
+# silently absorbed by either test.
+KNOWN_STALE_BEFORE = {"april_2013": pd.Timestamp("2013-04-11")}
 
-def lhmt() -> pd.Series:
+
+def lhmt(event) -> pd.Series:
     """LHMT daily Nemunas discharge at Smalininkai, m3/s, indexed by date."""
-    df = pd.read_csv(FIXTURE, comment="#", parse_dates=["observationDateUtc"])
+    df = pd.read_csv(FIXTURES[event.name], comment="#", parse_dates=["observationDateUtc"])
     return df.set_index("observationDateUtc")["waterDischarge"].astype(float)
 
 
-def model() -> pd.DataFrame:
-    df = pd.read_csv(XAVER.inputs_dir / "dis.csv", index_col=0, parse_dates=True)
+def model(event) -> pd.DataFrame:
+    path = event.inputs_dir / "dis.csv"
+    if not path.exists():
+        pytest.skip(f"{path} not built yet")
+    df = pd.read_csv(path, index_col=0, parse_dates=True)
     df.columns = [int(c) for c in df.columns]
     return df
 
 
-def _midnights():
-    return pd.date_range(common.TREF, common.TSTOP, freq="D")
+def _midnights(event):
+    return pd.date_range(event.tref, event.tstop, freq="D")
 
 
 @pytest.mark.integration
-def test_discharge_forcing_reproduces_lhmt_with_the_documented_lag():
-    """dis.csv at time T must carry LHMT's reading from T - NEMUNAS_LAG_DAYS."""
-    obs, nem = lhmt(), model()[1]
+@pytest.mark.parametrize("event", PROV_EVENTS, ids=lambda e: e.name)
+def test_discharge_forcing_reproduces_lhmt_with_the_documented_lag(event):
+    """dis.csv at time T must carry LHMT's reading from T - NEMUNAS_LAG_DAYS.
+
+    Scoped to skip source days before KNOWN_STALE_BEFORE[event.name] (April only):
+    the database's own record disagrees with LHMT there for reasons that are
+    pinned, not fixed, by test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013
+    below. Every other event, and every day this event's database agrees on, is
+    still checked at the full 0.5 m3/s tolerance.
+    """
+    obs, nem = lhmt(event), model(event)[1]
+    stale_before = KNOWN_STALE_BEFORE.get(event.name)
     compared = 0
-    for t in _midnights():
-        src = t - pd.Timedelta(days=common.NEMUNAS_LAG_DAYS)
+    for t in _midnights(event):
+        src = t - pd.Timedelta(days=event.nemunas_lag_days)
         if src not in obs.index:
+            continue
+        if stale_before is not None and src < stale_before:
             continue
         assert nem.loc[t] == pytest.approx(obs.loc[src], abs=0.5), (
             f"{t:%Y-%m-%d}: model {nem.loc[t]} vs LHMT {obs.loc[src]} at {src:%Y-%m-%d}")
@@ -55,38 +86,75 @@ def test_discharge_forcing_reproduces_lhmt_with_the_documented_lag():
 
 
 @pytest.mark.integration
-def test_the_lag_is_applied_in_the_right_direction():
+@pytest.mark.parametrize("event", PROV_EVENTS, ids=lambda e: e.name)
+def test_the_lag_is_applied_in_the_right_direction(event):
     """A lag of the wrong sign, or none, must fail rather than look plausible.
 
     This is the regression the value check alone cannot catch: Nemunas discharge
     changes slowly, so shifting it a day still gives numbers of the right size.
     """
-    obs, nem = lhmt(), model()[1]
+    obs, nem = lhmt(event), model(event)[1]
     same_day = wrong_way = 0
-    for t in _midnights():
-        for offset, name in ((0, "same_day"), (-common.NEMUNAS_LAG_DAYS, "wrong_way")):
+    for t in _midnights(event):
+        for offset, name in ((0, "same_day"), (-event.nemunas_lag_days, "wrong_way")):
             src = t - pd.Timedelta(days=offset)
             if src in obs.index and nem.loc[t] == pytest.approx(obs.loc[src], abs=0.5):
                 if name == "same_day":
                     same_day += 1
                 else:
                     wrong_way += 1
-    n = len(_midnights())
+    n = len(_midnights(event))
     assert same_day < n, "dis.csv matches LHMT with NO lag — NEMUNAS_LAG_DAYS is not being applied"
     assert wrong_way < n, "dis.csv matches LHMT with the lag INVERTED"
 
 
 @pytest.mark.integration
-def test_minija_column_is_the_documented_constant():
+@pytest.mark.parametrize("event", PROV_EVENTS, ids=lambda e: e.name)
+def test_minija_column_is_the_documented_constant(event):
     """Column 2 is Minija, held constant; a units slip would show here."""
-    minija = model()[2]
-    assert (minija == common.MINIJA_Q_DEC).all()
-    assert 10.0 < common.MINIJA_Q_DEC < 200.0, "implausible as m3/s for the Minija"
+    minija = model(event)[2]
+    assert (minija == event.minija_q).all()
+    assert 10.0 < event.minija_q < 200.0, "implausible as m3/s for the Minija"
+
+
+@pytest.mark.integration
+def test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013():
+    """Pins the known database/LHMT gap so it stays visible rather than swept under
+    the scoping in test_discharge_forcing_reproduces_lhmt_with_the_documented_lag.
+
+    curonian_db.gpkg's Smalininkai discharge for 2013-03-26..2013-04-10 (all one
+    source, source_id 167 -- confirmed not a file-boundary artifact) disagrees with
+    the LHMT fixture fetched 2026-09-16 by up to 53 m3/s. Bounding it here means a
+    database refresh, or a further LHMT revision either direction, breaks this
+    assertion and gets a human's attention instead of silently changing what the
+    other tests skip over.
+    """
+    event = common.event("april_2013")
+    obs = lhmt(event)
+    df = common.read_table(
+        "SELECT date, discharge_m3s FROM river_discharge WHERE river='Nemunas' AND gauge='Smalininkai' "
+        "AND date BETWEEN ? AND ?", ("2013-03-26", "2013-04-10"))
+    db = pd.Series(df["discharge_m3s"].values, index=pd.to_datetime(df["date"]))
+
+    compared, max_diff = 0, 0.0
+    for day, q in db.items():
+        if day not in obs.index:
+            continue
+        diff = abs(q - obs.loc[day])
+        max_diff = max(max_diff, diff)
+        assert diff <= 55.0, (
+            f"{day:%Y-%m-%d}: db {q} vs LHMT {obs.loc[day]}, diff {diff} exceeds the known ~53 m3/s gap")
+        compared += 1
+    assert compared >= 14, f"only {compared} days compared; expected the full 26 Mar-10 Apr stretch"
+    assert max_diff > 1.0, (
+        "the known database/LHMT gap has disappeared -- if the database was refreshed, move "
+        "KNOWN_STALE_BEFORE['april_2013'] back toward tref and update or remove this test")
 
 
 @pytest.mark.integration
 @pytest.mark.network
-def test_fixture_still_matches_the_live_lhmt_record():
+@pytest.mark.parametrize("event", PROV_EVENTS, ids=lambda e: e.name)
+def test_fixture_still_matches_the_live_lhmt_record(event):
     """Guards the other direction: that the committed fixture has not gone stale.
 
     LHMT can revise a historical series. Skips rather than fails when the API is
@@ -94,9 +162,10 @@ def test_fixture_still_matches_the_live_lhmt_record():
     """
     import requests
 
-    obs = lhmt()
+    obs = lhmt(event)
+    months = pd.period_range(event.tref, event.tstop, freq="M").strftime("%Y-%m")
     live = {}
-    for month in ("2013-11", "2013-12"):
+    for month in months:
         try:
             r = requests.get(f"{API}/hydro-stations/{STATION}/observations/historical/{month}",
                              headers={"User-Agent": "curonian-sfincs-tests/0.1"}, timeout=30)
@@ -112,6 +181,6 @@ def test_fixture_still_matches_the_live_lhmt_record():
         if day in live:
             assert live[day] == pytest.approx(q, abs=0.5), (
                 f"{day:%Y-%m-%d}: fixture {q} but LHMT now reports {live[day]} — "
-                f"refresh tests/data/lhmt_smalininkai_2013.csv")
+                f"refresh {FIXTURES[event.name].name}")
             checked += 1
     assert checked >= 14, f"live API returned only {checked} comparable days"
