@@ -245,10 +245,99 @@ def xaver_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.
     return out
 
 
+# The crest window A3 averages the delta-to-sea head over. Wider than the peak
+# itself on purpose: the 24 Apr head is depressed by a one-day 20 cm excursion in
+# the Klaipeda gauge (52, 55, 39, 45, 47 cm on 22-26 Apr), so a single instant
+# scores the sea's noise rather than the river's head. See spec section 8.
+APRIL_CREST = (pd.Timestamp("2013-04-22"), pd.Timestamp("2013-04-26"))
+APRIL_FILL_LEVEL = 0.20      # m; the rising limb crosses it at 10-18 cm/day
+PLATEAU_TIE_M = 0.05         # daily gauge readings this close are the same crest
+
+
+def _first_crossing(s: pd.Series, level: float) -> pd.Timestamp:
+    above = s[s >= level]
+    if above.empty:
+        return pd.NaT
+    return above.index[0]
+
+
+def april_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path | None = None,
+                    window=VALIDATION_WINDOW) -> list[dict]:
+    """Spec section 8 criteria for the April 2013 freshet."""
+    out = []
+    lo, hi = common.event("april_2013").score_window
+    obs_u = obs_by_site["Uostadvaris"].loc[lo:hi]
+    obs_k = obs_by_site["Klaipeda"].loc[lo:hi]
+    mod_u = his["Uostadvaris"].loc[lo:hi]
+
+    # A1: peak magnitude, observed peak taken from the gauge rather than hardcoded.
+    s = skill(mod_u, obs_u)
+    out.append({"name": "A1 Uostadvaris peak", "window": _window_label((lo, hi)),
+                "value": f"model peak {mod_u.max():.2f} m vs gauge "
+                         f"{obs_u.max():.2f} m, err {s['peak_err_m']:+.2f} m",
+                "threshold": "peak err within +/-0.15 m",
+                "verdict": "met" if abs(s["peak_err_m"]) <= 0.15 else "not met"})
+
+    # A2a: filling rate. The rise is resolved by the daily readings; the crest is not.
+    obs_cross = _first_crossing(obs_u, APRIL_FILL_LEVEL)
+    mod_cross = _first_crossing(mod_u, APRIL_FILL_LEVEL)
+    dt_h = (mod_cross - obs_cross).total_seconds() / 3600 if pd.notna(mod_cross) else float("nan")
+    out.append({"name": "A2a filling rate", "window": f"first crossing of +{APRIL_FILL_LEVEL:.2f} m",
+                "value": (f"model {mod_cross:%Y-%m-%d %H:%M} vs gauge {obs_cross:%Y-%m-%d %H:%M}, "
+                          f"dt {dt_h:+.0f} h" if pd.notna(mod_cross) else "model never reached the level"),
+                "threshold": "within +/-24 h of the observed crossing",
+                "verdict": "met" if pd.notna(mod_cross) and abs(dt_h) <= 24 else "not met"})
+
+    # A2b: the crest, accepted anywhere in the observed plateau widened by 12 h.
+    plateau = obs_u[obs_u >= obs_u.max() - PLATEAU_TIE_M].index
+    p0, p1 = plateau.min() - pd.Timedelta("12h"), plateau.max() + pd.Timedelta("12h")
+    t_peak = mod_u.idxmax()
+    out.append({"name": "A2b crest timing", "window": f"{_fmt_dt(p0)} to {_fmt_dt(p1)}",
+                "value": f"model peak {t_peak:%Y-%m-%d %H:%M}; observed plateau "
+                         f"{plateau.min():%d %b}-{plateau.max():%d %b}",
+                "threshold": "model peak inside the observed plateau +/-12 h",
+                "verdict": "met" if p0 <= t_peak <= p1 else "not met"})
+
+    # A3: the head the river holds above the sea, averaged over the crest. Matched
+    # on the calendar date (not the exact timestamp) so the 26th's 06:00 reading is
+    # included along with 22-25's -- the window is a set of days, not a half-open
+    # instant range, and excluding the last day would silently narrow the average
+    # the comment above describes.
+    stamps = [t for t in obs_u.index if APRIL_CREST[0] <= t.normalize() <= APRIL_CREST[1] and t in obs_k.index]
+    obs_head = float(np.mean([obs_u[t] - obs_k[t] for t in stamps]))
+    mod_head = float(np.mean([his["Uostadvaris"].loc[t] - his["Klaipeda"].loc[t] for t in stamps]))
+    out.append({"name": "A3 delta-to-sea head", "window": _window_label(APRIL_CREST),
+                "value": f"model {mod_head:.2f} m vs gauge {obs_head:.2f} m over {len(stamps)} readings, "
+                         f"err {mod_head - obs_head:+.2f} m",
+                "threshold": "mean head within +/-0.15 m",
+                "verdict": "met" if abs(mod_head - obs_head) <= 0.15 else "not met"})
+
+    # A4: the sea must beat the no-skill baseline, not merely sit near the mean.
+    s4 = skill(his["Klaipeda"], obs_k)
+    sigma = float(obs_k.std(ddof=0))
+    out.append({"name": "A4 Klaipeda control", "window": _window_label((lo, hi)),
+                "value": f"RMSE {s4['rmse']:.3f} m against an observed sd of {sigma:.3f} m",
+                "threshold": "RMSE <= 0.085 m (below the observed sd: a flat series fails)",
+                "verdict": "met" if s4["rmse"] <= 0.085 else "not met"})
+
+    # A5: Xaver's C4 verbatim. Whole-run by construction -- dtmaxout gives one zsmax
+    # record spanning tstart..tstop, so this cannot be restricted to the scoring window.
+    ground, flooded, _, _, _, _ = _flood_arrays(run_dir, window)
+    uplands = np.isfinite(ground) & (ground > 3.0)
+    n_upland_px = int(uplands.sum())
+    frac_pct = (100.0 * float(flooded[uplands].sum()) / n_upland_px) if n_upland_px else float("nan")
+    out.append({"name": "A5 Silute uplands", "window": f"whole run, delta window {window}",
+                "value": f"{frac_pct:.2f}% of land with ground > 3 m flooded",
+                "threshold": "< 1 % flooded",
+                "verdict": c4_verdict(frac_pct, n_upland_px)})
+    return out
+
+
 # Keyed by event name rather than held on the Event: a function reference on the
 # dataclass would make common.py depend on validate.py having been imported, and an
 # unset one would silently score April with Xaver's criteria instead of raising.
 CRITERIA = {"xaver_2013": xaver_criteria}
+CRITERIA["april_2013"] = april_criteria
 
 
 def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XAVER,
