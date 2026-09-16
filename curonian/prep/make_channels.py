@@ -3,6 +3,12 @@
 Distributaries come from OSM Overpass (waterway=river); the strait has no OSM
 fairway so it is a fixed coordinate list. Fallback coordinates cover an offline
 Overpass. Output: inputs/channels.geojson with rivwth [m] and rivbed [m datum].
+
+The fixed strait coordinate list is a poor centreline (see
+prep/derive_strait.py's docstring): if the committed output already carries a
+"thalweg"-sourced strait (produced by that module), main() preserves it across a
+rerun instead of overwriting it with STRAIT_LONLAT, on both the OSM-success and
+Overpass-failure paths.
 """
 from __future__ import annotations
 
@@ -92,7 +98,28 @@ def build_channels(osm: dict[str, LineString] | None) -> gpd.GeoDataFrame:
     return gdf
 
 
+def _existing_thalweg_strait(out):
+    """The current file's "strait" row, if prep/derive_strait.py produced it.
+
+    Read before anything else touches `out`, so that re-running this script (e.g.
+    once Overpass is reachable again) cannot silently overwrite a strait centreline
+    derived from the model's own active-cell mask with the hardcoded STRAIT_LONLAT
+    fallback -- the very defect prep/derive_strait.py and its guard test
+    (tests/test_make_channels.py) exist to catch. Returns None if there is no
+    existing file, it does not parse, or its strait source is not "thalweg".
+    """
+    if not out.exists():
+        return None
+    try:
+        row = gpd.read_file(out).set_index("name").loc["strait"]
+        return row if row["source"] == "thalweg" else None
+    except Exception:
+        return None
+
+
 def main(out=common.INPUTS / "channels.geojson", allow_fallback: bool = False) -> gpd.GeoDataFrame:
+    prior_strait = _existing_thalweg_strait(out)
+
     try:
         osm = fetch_osm_rivers()
         source = "osm"
@@ -101,11 +128,13 @@ def main(out=common.INPUTS / "channels.geojson", allow_fallback: bool = False) -
         # failure and RuntimeError is fetch_osm_rivers' own "no ways returned". A bug
         # in our client code (TypeError, KeyError, ...) must propagate instead of
         # silently downgrading a committed input to fallback coordinates.
-        # Check if existing file has OSM data
+        # Check if existing file has OSM data (strait may be "fixed" or, if
+        # prep/derive_strait.py produced it, "thalweg" -- either is fine to keep).
         if out.exists():
             try:
                 existing = gpd.read_file(out)
-                if existing["source"].tolist() == ["fixed", "osm", "osm"]:
+                kept = existing["source"].tolist()
+                if kept[:1] and kept[0] in ("fixed", "thalweg") and kept[1:] == ["osm", "osm"]:
                     print(f"Overpass failed ({exc}); keeping existing OSM-derived {out}")
                     return existing
             except Exception:
@@ -123,6 +152,13 @@ def main(out=common.INPUTS / "channels.geojson", allow_fallback: bool = False) -
 
     gdf = build_channels(osm)
     gdf["source"] = ["fixed", source, source]
+    if prior_strait is not None:
+        is_strait = gdf["name"] == "strait"
+        gdf.loc[is_strait, "geometry"] = [prior_strait["geometry"]]
+        gdf.loc[is_strait, "rivwth"] = prior_strait["rivwth"]
+        gdf.loc[is_strait, "rivbed"] = prior_strait["rivbed"]
+        gdf.loc[is_strait, "source"] = "thalweg"
+        print(f"keeping mask-derived strait centreline from {out} (source=thalweg)")
     out.parent.mkdir(parents=True, exist_ok=True)
     common.write_geojson(gdf, out)
     print(f"wrote {out}\n{gdf[['name', 'rivwth', 'rivbed', 'source']]}\nlengths m: {gdf.geometry.length.round().tolist()}")
