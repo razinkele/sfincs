@@ -9,6 +9,16 @@ from prep import fetch_gtsm as fg
 XAVER = common.EVENTS["xaver_2013"]
 
 
+def test_gtsm_request_months_come_from_the_event():
+    assert fg.request(common.event("xaver_2013"))["month"] == ["11", "12"]
+    assert fg.request(common.event("april_2013"))["month"] == ["04", "05"]
+
+
+def test_gtsm_downloads_into_the_event_directory():
+    assert fg.target_for(common.event("april_2013")) == common.INPUTS / "april_2013" / "gtsm.zip"
+    assert fg.target_for(common.event("xaver_2013")) == common.INPUTS / "xaver_2013" / "gtsm.zip"
+
+
 def _fake_gtsm_file(path, lons, lats, start="2013-11-01", hours=48, offset=0.0):
     t = pd.date_range(start, periods=hours, freq="h")
     wl = np.zeros((hours, len(lons)), dtype="float32")
