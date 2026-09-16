@@ -1,0 +1,6 @@
+GTSM offset applied: -0.212 m (calm window 2013-04-05..2013-04-11)
+boundary level: start -0.30 m, crest peak -0.01 m at 2013-04-25 01:00:00
+Klaipeda 06h obs peak: 0.15 m at 2013-04-24 06:00:00
+wind peak: 12.2 m/s at 2013-04-25 01:00:00 from 265 deg
+Nemunas Q: 410..2150 m3/s; Minija constant 83.0 m3/s
+FINDING: GTSM crest peak (2013-04-25 01:00:00) is 0 days 19:00:00 from the Klaipeda 06:00 gauge peak (2013-04-24 06:00:00) -- more than the 12 h check tolerance. Not a blocker: recorded per spec.
