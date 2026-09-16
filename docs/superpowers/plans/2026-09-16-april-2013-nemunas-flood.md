@@ -48,7 +48,7 @@
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `common.Event` (frozen dataclass), `common.EVENTS: dict[str, Event]`, `common.event(name: str) -> Event`, `common.MINIJA_Q_APR: float`. `Event.inputs_dir -> Path` is a property; **there is deliberately no `run_dir` property** — run directories are keyed by run name, not event name.
+- Produces: `common.Event` (frozen dataclass, fields as in spec §4 including `score_label`), `common.EVENTS: dict[str, Event]`, `common.event(name: str) -> Event`, `common.MINIJA_Q_APR: float`. **No `criteria` field** — see Task 6. `Event.inputs_dir -> Path` is a property; **there is deliberately no `run_dir` property** — run directories are keyed by run name, not event name.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -70,6 +70,7 @@ def test_xaver_event_carries_todays_constants_unchanged():
     assert ev.score_window == (pd.Timestamp("2013-12-05"), pd.Timestamp("2013-12-09"))
     assert ev.zsini is None                                  # taken from the boundary
     assert ev.wind_check == (15.0, "the Xaver gale")
+    assert ev.score_label == "Storm window"             # today's report heading
 
 
 def test_april_event_matches_the_spec():
@@ -83,6 +84,7 @@ def test_april_event_matches_the_spec():
     assert ev.minija_q == common.MINIJA_Q_APR == 83.0
     assert ev.wind_check is None
     assert ev.zsini == -0.17
+    assert ev.score_label == "Scoring window"
 
 
 def test_inputs_dir_derives_from_the_name_and_run_dir_does_not():
@@ -114,7 +116,6 @@ In `curonian/common.py`, add to the imports:
 
 ```python
 from dataclasses import dataclass
-from typing import Callable
 ```
 
 and after the `MINIJA_Q_DEC` / `NEMUNAS_LAG_DAYS` block:
@@ -149,7 +150,7 @@ class Event:
     nemunas_lag_days: int
     wind_check: tuple | None                          # (min peak m/s, what it is)
     zsini: float | None                               # None = take it from the boundary
-    criteria: Callable | None = None                  # set by validate.py at import
+    score_label: str                                  # the report's window heading
 
     @property
     def inputs_dir(self) -> Path:
@@ -171,7 +172,8 @@ EVENTS = {
         peak_window=("2013-12-05", "2013-12-08"), peak_label="storm",
         gtsm_months=("11", "12"), minija_q=MINIJA_Q_DEC,
         nemunas_lag_days=NEMUNAS_LAG_DAYS,
-        wind_check=(15.0, "the Xaver gale"), zsini=None),
+        wind_check=(15.0, "the Xaver gale"), zsini=None,
+        score_label="Storm window"),
     "april_2013": Event(
         name="april_2013", title="April 2013 Nemunas freshet",
         tref=pd.Timestamp("2013-04-05 00:00"), tstop=pd.Timestamp("2013-05-02 00:00"),
@@ -187,7 +189,8 @@ EVENTS = {
         # The lagoon stands above the sea at TREF (Nida -0.10, Uostadvaris -0.13,
         # Vente -0.28 m; Klaipeda -0.36), so taking zsini from the boundary would
         # start the whole lagoon ~0.23 m low. Mean of the three lagoon gauges.
-        zsini=-0.17),
+        zsini=-0.17,
+        score_label="Scoring window"),
 }
 
 
@@ -553,7 +556,27 @@ def download(event: common.Event, target: Path | None = None) -> Path:
     return target
 ```
 
-`REQUEST_BASE` is today's `REQUEST` minus `month`. `fetch_era5_grid` takes `event` the same way, writing `event.inputs_dir / "era5_raw.nc"`, `"era5_grid.nc"` and `"era5_grid_summary.txt"`, and slicing to `[event.tref - 1h, event.tstop + 1h]`.
+`REQUEST_BASE` is today's `REQUEST` minus `month`. `fetch_era5_grid` takes `event`
+the same way, writing `event.inputs_dir / "era5_raw.nc"`, `"era5_grid.nc"` and
+`"era5_grid_summary.txt"`, and slicing to `[event.tref - 1h, event.tstop + 1h]`.
+
+**Both modules need a CLI added, not just threaded.** Today `fetch_gtsm.main()`
+takes no arguments and the entry point is a bare `main()`:
+
+```python
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
+    return p.parse_args(argv)
+
+
+if __name__ == "__main__":
+    main(common.event(parse_args().event))
+```
+
+`import argparse` goes at the top of each. Task 9 invokes exactly this interface, so
+if it is missed there, `python -m prep.fetch_gtsm --event april_2013` fails with
+`unrecognized arguments` before spending any CDS quota — noisy, not silent.
 
 - [ ] **Step 4: Run the tests**
 
@@ -681,18 +704,23 @@ git commit -m "Build for an event, and take April's initial level from the lagoo
 
 **Interfaces:**
 - Consumes: `common.Event`.
-- Produces: `xaver_criteria(his, obs_by_site, run_dir, window)` (today's body verbatim), `criteria(his, obs_by_site, run_dir=common.RUN_XAVER, window=VALIDATION_WINDOW, event=None)` dispatching to `event.criteria`, `main(event, run_dir=None)`, `parse_args` accepting `--event` and `--run`. `common.Event.criteria` is populated at `validate` import time.
+- Produces: `xaver_criteria(his, obs_by_site, run_dir, window)` (today's body verbatim), `criteria(his, obs_by_site, run_dir=common.RUN_XAVER, window=VALIDATION_WINDOW, event=None)` dispatching to `event.criteria`, `main(event, run_dir=None)`, `parse_args` accepting `--event` and `--run`. the dispatch table `validate.CRITERIA` is keyed by event name.
 
 **The dispatch keeps the nine existing `va.criteria(...)` call sites working unchanged**, which is what preserves the test gate.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-def test_criteria_defaults_to_xaver_and_dispatches_on_the_event():
-    his, obs = _synthetic_his(), _synthetic_obs()
-    assert [c["name"] for c in va.criteria(his, obs, SYNTH_RUN)][0].startswith("C1")
-    names = [c["name"] for c in va.criteria(his, obs, SYNTH_RUN, event=common.event("april_2013"))]
-    assert names[0].startswith("A1")
+def test_criteria_defaults_to_xaver(synth_run_dir):
+    got = va.criteria(_base_his(), _base_obs(), synth_run_dir, window=SYNTH_WINDOW)
+    assert got[0]["name"].startswith("C1")
+
+
+def test_criteria_raises_rather_than_scoring_with_the_wrong_events_rules(synth_run_dir):
+    class Fake:
+        name = "not_an_event"
+    with pytest.raises(KeyError):
+        va.criteria(_base_his(), _base_obs(), synth_run_dir, window=SYNTH_WINDOW, event=Fake())
 
 
 def test_event_and_run_compose_in_validate():
@@ -711,19 +739,19 @@ Expected: FAIL — `criteria() got an unexpected keyword argument 'event'`.
 Rename today's `criteria` body to `xaver_criteria` **with no other change** (it keeps using the module-level `STORM_WINDOW`), then add:
 
 ```python
+# Keyed by event name rather than held on the Event: a function reference on the
+# dataclass would make common.py depend on validate.py having been imported, and an
+# unset one would silently score April with Xaver's criteria instead of raising.
+CRITERIA = {"xaver_2013": xaver_criteria, "april_2013": april_criteria}
+
+
 def criteria(his, obs_by_site, run_dir=common.RUN_XAVER, window=VALIDATION_WINDOW, event=None):
-    """Dispatch to the event's own criteria. Defaults to Xaver so the existing
-    call sites -- and the existing verdicts -- are untouched."""
-    fn = (event.criteria if event is not None else None) or xaver_criteria
-    return fn(his, obs_by_site, run_dir, window)
-
-
-# Populate the registry's function references once, here, where both live.
-common.EVENTS["xaver_2013"] = replace(common.EVENTS["xaver_2013"], criteria=xaver_criteria)
-common.EVENTS["april_2013"] = replace(common.EVENTS["april_2013"], criteria=april_criteria)
+    """Dispatch on the event. Defaults to Xaver so the nine existing call sites --
+    and the existing verdicts -- are untouched. An unknown event raises KeyError
+    rather than falling back to the wrong criteria."""
+    return CRITERIA[event.name if event is not None else "xaver_2013"](
+        his, obs_by_site, run_dir, window)
 ```
-
-(`from dataclasses import replace` — the dataclass is frozen, so the registry entries are rebuilt rather than mutated.)
 
 `main` takes the event and uses its title:
 
@@ -734,9 +762,8 @@ def main(event: common.Event, run_dir: Path | None = None) -> None:
     obs_by_site = {g: load_gauge_levels(g, event) for g in GAUGES}
     lines = [f"# {event.title} validation", "", f"Whole period: {_window_label((event.tref, event.tstop))}", ""]
     lines += _skill_table_lines(his, obs_by_site, window=None)
-    # The heading word is what app/sfincs_data._PERIOD_RE looks for -- see Task 11.
-    heading = "Storm window" if event.name == "xaver_2013" else "Scoring window"
-    lines += ["", f"{heading}: {_window_label(event.score_window)}", ""]
+    # event.score_label is what app/sfincs_data._PERIOD_RE looks for -- see Task 11.
+    lines += ["", f"{event.score_label}: {_window_label(event.score_window)}", ""]
     lines += _skill_table_lines(his, obs_by_site, window=event.score_window)
     ...
     crit = criteria(his, obs_by_site, run_dir, event=event)
@@ -773,9 +800,8 @@ git commit -m "Dispatch the success criteria on the event"
 - [ ] **Step 1: Write the failing tests, each proved by sabotage**
 
 ```python
-CREST = (pd.Timestamp("2013-04-22"), pd.Timestamp("2013-04-26"))
-
-
+# Reuses the file's existing `synth_run_dir` fixture and `SYNTH_WINDOW` constant,
+# and its `_base_his()` / `_base_obs()` helpers for the Xaver cases.
 def _april_his(peak_day="2013-04-24", cross_day="2013-04-20", head=0.48):
     """Synthetic hourly model output that passes every April criterion."""
     t = pd.date_range("2013-04-05", "2013-05-02", freq="h")
@@ -791,26 +817,26 @@ def _verdict(crit, prefix):
 
 
 @pytest.mark.integration
-def test_april_criteria_pass_on_a_faithful_model():
+def test_april_criteria_pass_on_a_faithful_model(synth_run_dir):
     obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
-    crit = va.april_criteria(_april_his(), obs, SYNTH_RUN, SYNTH_WINDOW)
+    crit = va.april_criteria(_april_his(), obs, synth_run_dir, SYNTH_WINDOW)
     assert [c["name"][:3] for c in crit] == ["A1 ", "A2a", "A2b", "A3 ", "A4 ", "A5 "]
     for p in ("A1", "A2a", "A2b", "A3"):
         assert _verdict(crit, p) == "met", p
 
 
 @pytest.mark.integration
-def test_a2a_fails_when_the_lagoon_fills_two_days_early():
+def test_a2a_fails_when_the_lagoon_fills_two_days_early(synth_run_dir):
     obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
-    crit = va.april_criteria(_april_his(cross_day="2013-04-18"), obs, SYNTH_RUN, SYNTH_WINDOW)
+    crit = va.april_criteria(_april_his(cross_day="2013-04-18"), obs, synth_run_dir, SYNTH_WINDOW)
     assert _verdict(crit, "A2a") == "not met"
     assert _verdict(crit, "A2b") == "met", "the crest is still in the plateau -- A2a is the sharp half"
 
 
 @pytest.mark.integration
-def test_a3_fails_when_the_delta_does_not_stand_above_the_sea():
+def test_a3_fails_when_the_delta_does_not_stand_above_the_sea(synth_run_dir):
     obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
-    crit = va.april_criteria(_april_his(head=0.20), obs, SYNTH_RUN, SYNTH_WINDOW)
+    crit = va.april_criteria(_april_his(head=0.20), obs, synth_run_dir, SYNTH_WINDOW)
     assert _verdict(crit, "A3") == "not met"
 ```
 
@@ -992,7 +1018,23 @@ def model(event) -> pd.DataFrame:
     return df
 ```
 
-Then add `@pytest.mark.parametrize("event", PROV_EVENTS, ids=lambda e: e.name)` to each of the four tests, replacing `common.MINIJA_Q_DEC` with `event.minija_q` and `common.NEMUNAS_LAG_DAYS` with `event.nemunas_lag_days`. The live-API test's `for month in ("2013-11", "2013-12")` becomes the event's own months.
+**`_midnights()` must take the event too** — at `test_forcing_provenance.py:37` it
+reads `common.TREF, common.TSTOP`, so parametrized over April it would iterate
+November dates, find none of them in the April fixture, and fail `compared >= 14`
+with nothing compared:
+
+```python
+def _midnights(event):
+    return pd.date_range(event.tref, event.tstop, freq="D")
+```
+
+Then add `@pytest.mark.parametrize("event", PROV_EVENTS, ids=lambda e: e.name)` to
+each of the four tests, replacing `common.MINIJA_Q_DEC` with `event.minija_q`,
+`common.NEMUNAS_LAG_DAYS` with `event.nemunas_lag_days`, and every `_midnights()`
+call with `_midnights(event)`. The live-API test's
+`for month in ("2013-11", "2013-12")` becomes the event's own months — derive them
+from `event.tref`/`event.tstop` rather than from `gtsm_months`, which is a CDS
+request field and covers a different span.
 
 - [ ] **Step 4: Run the tests**
 

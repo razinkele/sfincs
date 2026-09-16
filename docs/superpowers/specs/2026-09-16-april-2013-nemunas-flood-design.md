@@ -128,7 +128,7 @@ class Event:
     nemunas_lag_days: int
     wind_check: tuple[float, str] | None             # (min peak m/s, what it is)
     zsini: float | None                              # None = take it from the boundary
-    criteria: Callable                               # the per-event criteria function
+    score_label: str                                 # the report's window heading
 
 EVENTS = {
     "xaver_2013": Event(
@@ -140,7 +140,7 @@ EVENTS = {
         peak_window=("2013-12-05", "2013-12-08"), peak_label="storm",
         gtsm_months=("11", "12"), minija_q=46.0, nemunas_lag_days=1,
         wind_check=(15.0, "the Xaver gale"), zsini=None,
-        criteria=xaver_criteria),
+        score_label="Storm window"),
     "april_2013": Event(
         name="april_2013", title="April 2013 Nemunas freshet",
         tref=2013-04-05 00:00, tstop=2013-05-02 00:00,
@@ -150,7 +150,7 @@ EVENTS = {
         peak_window=("2013-04-19", "2013-04-25"), peak_label="crest",
         gtsm_months=("04", "05"), minija_q=83.0, nemunas_lag_days=1,
         wind_check=None, zsini=-0.17,
-        criteria=april_criteria),
+        score_label="Scoring window"),
 }
 ```
 
@@ -185,11 +185,17 @@ code needs a hook the concept does not:
   the refactor changed no bytes.
 - **`peak_window` is the `forcing_summary.txt` slice**, one day shorter than
   `score_window`; keeping it separate keeps that tracked file identical.
-- **`criteria` is an explicit function reference.** `validate.criteria()` is
-  Xaver-specific in ways no data field can express — it hardcodes 2013-12-07/08
-  timestamps and the 0.84 m Nida peak — so it splits into `xaver_criteria` (today's
-  body, unchanged) and `april_criteria` (section 8), selected by this field rather
-  than by branching on a name.
+- **`score_label`** is the report's own heading for its scored window — `Storm
+  window` for Xaver, `Scoring window` for April — so neither `validate.py` nor the
+  viewer has to branch on the event's name to label it.
+
+`validate.criteria()` is Xaver-specific in ways no data field can express (it
+hardcodes 2013-12-07/08 timestamps and the 0.84 m Nida peak), so it splits into
+`xaver_criteria` (today's body, unchanged) and `april_criteria` (section 8). The
+dispatch is a **table in `validate.py` keyed by event name**, not a field on
+`Event`: a function reference on the dataclass would make `common` depend on
+`validate` having been imported, and an unset one would silently score April with
+Xaver's criteria instead of raising.
 - **`zsini`** — see section 7.
 
 ## 5. File layout
@@ -407,7 +413,7 @@ because building and validating that mask is a project of its own, with real cav
 overpasses ~03:40 and ~09:40 UTC against a 06:00 gauge). It is the obvious follow-up,
 recorded in section 12 rather than silently dropped.
 
-**The report's window heading is `Scoring window:`.** `app/sfincs_data._PERIOD_RE`
+**The report's window heading is `Scoring window:`** (`event.score_label`). `app/sfincs_data._PERIOD_RE`
 hardcodes `^(Whole period|Storm window):` and is the only thing that finds both the
 period headings and the per-station metric tables, so it must learn the third word or
 April's metric table silently vanishes from the viewer (section 11, step 10).
