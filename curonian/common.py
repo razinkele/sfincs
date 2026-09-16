@@ -171,3 +171,28 @@ def read_table(sql: str, params: tuple = ()) -> pd.DataFrame:
     """Run a read-only SQL query against the attribute tables of curonian_db.gpkg."""
     with closing(sqlite3.connect(_db_uri(), uri=True)) as con:
         return pd.read_sql_query(sql, con, params=params)
+
+
+def read_active_mask(run_dir: Path):
+    """Read a built run's active-cell mask and cell-centre coordinates.
+
+    The mask (msk > 0) is set by setup_dep + setup_mask_active + setup_mask_bounds,
+    all of which build_model.build() runs before setup_subgrid's channel burn -- so
+    it does not depend on channels.geojson and is safe ground truth to check a
+    channel centreline against, or to derive one from.
+    """
+    from hydromt_sfincs import SfincsModel
+
+    sf = SfincsModel(root=str(run_dir), mode="r")
+    sf.read()
+    msk = sf.grid["msk"].values
+    xs = sf.grid["msk"].raster.xcoords.values
+    ys = sf.grid["msk"].raster.ycoords.values
+    return msk, xs, ys
+
+
+def mask_value_at(msk: np.ndarray, xs: np.ndarray, ys: np.ndarray, x: float, y: float) -> int:
+    """The mask value of the grid cell whose centre is nearest (x, y)."""
+    i = int(np.argmin(np.abs(xs - x)))
+    j = int(np.argmin(np.abs(ys - y)))
+    return int(msk[j, i])
