@@ -73,6 +73,25 @@ None to install. The shared env `/opt/micromamba/envs/shiny` already provides
 shiny, pandas, xarray, netCDF4 and matplotlib. The viewer never opens
 `sfincs_map.nc`; station series come from the ~200 KB `sfincs_his.nc`.
 
+## Tests
+
+The app's tests import `app.py`, so they need the same `shiny` env the app runs
+in — **not** `hydromt-sfincs`, which has no `shiny` and fails at collection:
+
+```bash
+micromamba run -n shiny python -m pytest app/test_sfincs_data.py -q
+```
+
+The model's own suite stays in its own env, run from `curonian/`:
+
+```bash
+micromamba run -n hydromt-sfincs python -m pytest tests -q
+```
+
+Run the latter from the main checkout, not a git worktree: two integration
+tests need `lagoon_bathy_50m.tif` and the SFINCS binary, both git-ignored and
+so absent from any worktree, and they fail rather than skip there.
+
 ## Why Shiny Server rather than a dedicated service
 
 This app is light and read-only, and matches the `/shyfem-ui/` and `/telemac/`
