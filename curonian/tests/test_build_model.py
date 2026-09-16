@@ -26,6 +26,29 @@ def test_parse_args_pressure_without_grid_wind_exits():
         bm.parse_args(["--pressure"])
 
 
+def test_event_and_run_name_compose():
+    args = bm.parse_args([])
+    assert args.event == "xaver_2013" and args.run_name == "xaver_2013"
+
+    args = bm.parse_args(["--event", "april_2013"])
+    assert args.run_name == "april_2013", "run name defaults to the event's name"
+
+    args = bm.parse_args(["--event", "xaver_2013", "--wind", "grid",
+                          "--run-name", "xaver_2013_gridwind"])
+    assert (args.event, args.run_name) == ("xaver_2013", "xaver_2013_gridwind")
+
+
+def test_april_config_uses_the_events_clock_and_initial_level(monkeypatch):
+    """zsini comes from the event when it sets one, not from the sea boundary."""
+    ev = common.event("april_2013")
+    cfg = bm.config_for(ev, zs_boundary=-0.36)
+    assert cfg["tstart"] == "20130405 000000" and cfg["tstop"] == "20130502 000000"
+    assert cfg["zsini"] == -0.17
+
+    cfg = bm.config_for(common.event("xaver_2013"), zs_boundary=0.389)
+    assert cfg["zsini"] == 0.389, "Xaver keeps taking zsini from the boundary"
+
+
 @pytest.mark.integration
 def test_built_model_passes_checks():
     run = common.RUN_XAVER
