@@ -369,13 +369,17 @@ readings, 19 h is inside the observation's own resolution).
   balance only about a quarter of the freshet's volume left through the
   strait; the rest stayed in the lagoon. The real lagoon did the opposite:
   Uostadvaris peaked at 0.54 m and had receded to 0.10 m by 2 May, passing
-  essentially all of it through.
+  essentially all of it through. This 26% assumes the 1.49 m rise applies
+  basin-wide; the Juodkrante observation below shows the northern lagoon did
+  not rise anywhere near that much, so the true basin-averaged rise is lower
+  and 26% is a floor on what actually left, not a point estimate — it does
+  not change the conclusion that most of the freshet was retained.
 - Two signatures corroborate the mass-balance arithmetic independently.
   (1) By the end of the run Uostadvaris, Nida and Vente sit within 0.003 m of
   each other — 1.314 m, 1.317 m and 1.314 m respectively at 2013-05-02 00:00
   (`sfincs_his.nc`) — even though the observed event holds an 0.18 m gradient
   across exactly these three gauges at their own peaks (Uostadvaris 0.54 m,
-  Nida 0.36 m, Ventė 0.29 m; spec section 2). A sustained river inflow should
+  Nida 0.36 m, Vente 0.29 m; spec section 2). A sustained river inflow should
   leave a head from the delta down to the strait; the model erases it instead
   of reproducing it. (2) The peak lag grows with distance from the strait —
   Nida +72 h, Vente +120 h, Uostadvaris +144 h (scoring-window table above) —
