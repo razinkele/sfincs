@@ -1,0 +1,32 @@
+# Nemunas daily discharge and water level at Smalininkai, 25 Nov - 11 Dec 2013.
+#
+# Source: Lithuanian Hydrometeorological Service (LHMT) open API, api.meteo.lt,
+#   /v1/hydro-stations/smalininku-vms/observations/historical/<YYYY-MM>
+# Retrieved 2026-09-16. Licence: CC BY-SA 4.0 -- attribution is a condition of
+#   access, so it travels with this file.
+#
+# This is the authoritative record the model's own discharge forcing derives
+# from (via curonian_db.gpkg). tests/test_forcing_provenance.py checks that
+# inputs/dis.csv still reproduces it with NEMUNAS_LAG_DAYS applied.
+#
+# waterLevel is cm above the station's own local gauge zero -- NOT the model
+# datum, and not comparable to common.GAUGE_ZERO_CM, which is for the lagoon
+# gauges. Only waterDischarge (m3/s) is used by the tests.
+observationDateUtc,waterLevel,waterDischarge
+2013-11-25,159,426
+2013-11-26,134,373
+2013-11-27,138,379
+2013-11-28,124,351
+2013-11-29,155,418
+2013-11-30,206,535
+2013-12-01,215,555
+2013-12-02,195,507
+2013-12-03,185,484
+2013-12-04,191,498
+2013-12-05,193,503
+2013-12-06,212,548
+2013-12-07,213,551
+2013-12-08,251,648
+2013-12-09,253,653
+2013-12-10,248,640
+2013-12-11,245,632
