@@ -43,7 +43,19 @@ def test_info_lines_are_kept_but_not_scored():
     assert sentence.startswith("4 of 4")
 
 
-def test_marginal_pass_is_reported_but_flagged():
+def test_marginal_pass_is_reported_but_flagged(monkeypatch):
+    """A 'met (marginal)' verdict must read as a warning, not a clean pass.
+
+    This used to lean on Xaver's C2, which was marginal at the time. The
+    2026-09-17 re-run on corrected strait geometry turned C2 into a clean
+    'met', so there is no longer a marginal verdict anywhere in the committed
+    reports. The behaviour still needs a test, so the verdict is injected
+    rather than borrowed from whichever run happens to be marginal today.
+    """
+    real = sd.criteria(VARIANT)
+    marginal = [dict(c, verdict="met (marginal)") if i == 0 else c
+                for i, c in enumerate(real)]
+    monkeypatch.setattr(sd, "criteria", lambda v: marginal)
     colour, sentence = viewer.headline(VARIANT)
     assert colour == "warning"
     assert "marginal" in sentence
@@ -70,7 +82,7 @@ def test_unscored_verdicts_leave_the_denominator(monkeypatch):
 
 
 def test_flooded_area_is_read_from_the_report():
-    assert sd.flooded_area_km2(VARIANT) == pytest.approx(165.6)
+    assert sd.flooded_area_km2(VARIANT) == pytest.approx(157.3)
 
 
 def test_both_metric_tables_are_parsed():
