@@ -1,4 +1,4 @@
-"""Score the Xaver run against the gauges and draw the delta flood extent."""
+"""Score a hindcast event's run against the gauges and draw the delta flood extent."""
 from __future__ import annotations
 
 import argparse
@@ -26,7 +26,6 @@ GAUGES = ("Klaipeda", "Nida", "Vente", "Uostadvaris")
 VALIDATION_WINDOW = (325_000, 6_105_000, 360_000, 6_145_000)
 
 STORM_WINDOW = (pd.Timestamp("2013-12-05 00:00"), pd.Timestamp("2013-12-09 00:00"))
-WHOLE_WINDOW = (common.TREF, common.TSTOP)
 
 
 def station_names(run_dir: Path) -> list[str]:
@@ -129,7 +128,7 @@ def _flood_arrays(run_dir: Path, window):
 
 
 def flood_map(run_dir: Path = common.RUN_XAVER, out_png: Path | None = None,
-              window=VALIDATION_WINDOW) -> float:
+              window=VALIDATION_WINDOW, event: common.Event = common.EVENTS["xaver_2013"]) -> float:
     ground, flooded, depth, gx, gy, cell_km2 = _flood_arrays(run_dir, window)
     area_km2 = float(flooded.sum() * cell_km2)
     if out_png:
@@ -137,7 +136,7 @@ def flood_map(run_dir: Path = common.RUN_XAVER, out_png: Path | None = None,
         ax.imshow(np.where(ground > 0, ground, np.nan), extent=[gx[0], gx[-1], gy[-1], gy[0]], cmap="Greys_r", vmin=-2, vmax=8)
         im = ax.imshow(np.where(flooded, depth, np.nan), extent=[gx[0], gx[-1], gy[-1], gy[0]], cmap="Blues", vmin=0, vmax=2)
         fig.colorbar(im, ax=ax, label="max flood depth on land [m]")
-        ax.set_title(f"Xaver 2013: flooded land in the delta window = {area_km2:.1f} km²")
+        ax.set_title(f"{event.title}: flooded land in the delta window = {area_km2:.1f} km²")
         fig.savefig(out_png, dpi=150); plt.close(fig)
     return area_km2
 
@@ -168,8 +167,8 @@ def c4_verdict(frac_pct: float, n_upland_px: int) -> str:
     return "met" if frac_pct < 1.0 else "not met"
 
 
-def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XAVER,
-             window=VALIDATION_WINDOW) -> list[dict]:
+def xaver_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XAVER,
+                    window=VALIDATION_WINDOW) -> list[dict]:
     """Spec section 9 success criteria, each as {name, window, value, threshold, verdict}."""
     out = []
 
@@ -246,6 +245,21 @@ def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XA
     return out
 
 
+# Keyed by event name rather than held on the Event: a function reference on the
+# dataclass would make common.py depend on validate.py having been imported, and an
+# unset one would silently score April with Xaver's criteria instead of raising.
+CRITERIA = {"xaver_2013": xaver_criteria}
+
+
+def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XAVER,
+             window=VALIDATION_WINDOW, event: common.Event | None = None) -> list[dict]:
+    """Dispatch on the event. Defaults to Xaver so the nine existing call sites --
+    and the existing verdicts -- are untouched. An unknown event raises KeyError
+    rather than falling back to the wrong criteria."""
+    return CRITERIA[event.name if event is not None else "xaver_2013"](
+        his, obs_by_site, run_dir, window)
+
+
 def _skill_table_lines(his: pd.DataFrame, obs_by_site: dict, window: tuple | None) -> list[str]:
     lines = ["| station | n | bias m | RMSE m | r | peak err m | peak dt h |", "|---|---|---|---|---|---|---|"]
     for g in GAUGES:
@@ -257,14 +271,16 @@ def _skill_table_lines(his: pd.DataFrame, obs_by_site: dict, window: tuple | Non
     return lines
 
 
-def main(run_dir: Path = common.RUN_XAVER) -> None:
+def main(event: common.Event, run_dir: Path | None = None) -> None:
+    run_dir = run_dir or common.RUNS / event.name
     his = load_his(run_dir)
-    obs_by_site = {g: load_gauge_levels(g) for g in GAUGES}
+    obs_by_site = {g: load_gauge_levels(g, event) for g in GAUGES}
 
-    lines = ["# Xaver 2013 validation", "", f"Whole period: {_window_label(WHOLE_WINDOW)}", ""]
+    lines = [f"# {event.title} validation", "", f"Whole period: {_window_label((event.tref, event.tstop))}", ""]
     lines += _skill_table_lines(his, obs_by_site, window=None)
-    lines += ["", f"Storm window: {_window_label(STORM_WINDOW)}", ""]
-    lines += _skill_table_lines(his, obs_by_site, window=STORM_WINDOW)
+    # event.score_label is what app/sfincs_data._PERIOD_RE looks for -- see Task 11.
+    lines += ["", f"{event.score_label}: {_window_label(event.score_window)}", ""]
+    lines += _skill_table_lines(his, obs_by_site, window=event.score_window)
 
     fig, axes = plt.subplots(len(GAUGES), 1, figsize=(10, 3 * len(GAUGES)), sharex=True)
     for ax, g in zip(axes, GAUGES):
@@ -273,10 +289,10 @@ def main(run_dir: Path = common.RUN_XAVER) -> None:
         ax.set_ylabel(f"{g} [m]"); ax.grid(alpha=0.3); ax.legend(loc="upper left")
     fig.autofmt_xdate(); fig.tight_layout(); fig.savefig(run_dir / "validation_timeseries.png", dpi=130); plt.close(fig)
 
-    area = flood_map(run_dir, run_dir / "flood_extent_delta.png")
+    area = flood_map(run_dir, run_dir / "flood_extent_delta.png", event=event)
     lines += ["", f"Flooded land in the delta window (depth > 5 cm, ground > 0 m): **{area:.1f} km²**"]
 
-    crit = criteria(his, obs_by_site, run_dir)
+    crit = criteria(his, obs_by_site, run_dir, event=event)
     lines += ["", "### Success criteria (spec section 9)"]
     for c in crit:
         lines.append(f"- {c['name']} [{c['window']}]: **{c['verdict']}** -- {c['value']} (threshold: {c['threshold']})")
@@ -292,10 +308,13 @@ def main(run_dir: Path = common.RUN_XAVER) -> None:
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--run", default="xaver_2013", help="runs/<name> to validate; results go to results/<name>")
-    return p.parse_args(argv)
+    p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
+    p.add_argument("--run", default=None, help="runs/<name> to validate; results go to results/<name>; defaults to the event name")
+    args = p.parse_args(argv)
+    args.run = args.run or args.event
+    return args
 
 
 if __name__ == "__main__":
     args = parse_args()
-    main(run_dir=common.RUNS / args.run)
+    main(common.event(args.event), run_dir=common.RUNS / args.run)

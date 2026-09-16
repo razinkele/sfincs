@@ -16,6 +16,12 @@ def test_parse_args_custom_run_name():
     assert args.run == "xaver_2013_gridwind"
 
 
+def test_event_and_run_compose_in_validate():
+    assert va.parse_args([]).run == "xaver_2013"
+    assert va.parse_args(["--event", "april_2013"]).run == "april_2013"
+    assert va.parse_args(["--event", "april_2013", "--run", "april_2013_test"]).run == "april_2013_test"
+
+
 def test_skill_on_synthetic_series():
     t = pd.date_range("2013-12-01", periods=240, freq="h")
     model = pd.Series(np.exp(-((np.arange(240) - 100) / 30.0) ** 2), index=t)   # a single, isolated peak
@@ -323,3 +329,19 @@ def test_criteria_c4_reports_na_on_a_window_without_uplands(lowland_run_dir):
     c4 = next(c for c in crit if c["name"].startswith("C4"))
     assert c4["verdict"] == "n/a"
     assert "no land above 3 m" in c4["value"]
+
+
+# ---------------------------------------------------------------------------
+# criteria() dispatch on the event
+# ---------------------------------------------------------------------------
+
+def test_criteria_defaults_to_xaver(synth_run_dir):
+    got = va.criteria(_base_his(), _base_obs(), synth_run_dir, window=SYNTH_WINDOW)
+    assert got[0]["name"].startswith("C1")
+
+
+def test_criteria_raises_rather_than_scoring_with_the_wrong_events_rules(synth_run_dir):
+    class Fake:
+        name = "not_an_event"
+    with pytest.raises(KeyError):
+        va.criteria(_base_his(), _base_obs(), synth_run_dir, window=SYNTH_WINDOW, event=Fake())
