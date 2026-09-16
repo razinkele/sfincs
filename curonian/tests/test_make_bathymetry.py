@@ -79,3 +79,32 @@ def test_isobath_points_anchors_island_shorelines_at_zero():
     assert on_island_edge < 1.0, "no zero-depth anchor on the island shoreline"
     corner = np.abs(zeros - np.array([600.0, 600.0])).sum(axis=1).min()
     assert corner < 1.0, "island ring not segmentized all the way round"
+
+
+@pytest.mark.integration
+def test_strait_north_of_the_cut_is_nodata_not_a_zero_bar():
+    """North of the strait's throat this raster must be nodata, not an interpolated 0 m.
+
+    isobath_points() anchors depth 0 on every lagoon shoreline vertex, including both
+    banks (see its comment) -- deliberate everywhere the lagoon is wide, but where the
+    polygon narrows into the Klaipeda strait (down to ~600-770 m bank to bank a little
+    north of northing 6_174_500, see mb.STRAIT_CLIP_NORTHING) both banks fall inside
+    each other's anchor radius, and LinearNDInterpolator, seeing nothing but zeros on
+    either side, returns ~0 m across the whole throat. That false 0 m bar (measured
+    exactly 0.00 at e.g. x=318150..318550, y=6179500) then outranks dem_5m and
+    emodnet_2022 in build_model.DATASETS_DEP -- the one place the lagoon can drain gets
+    a datum-level dam. Before the fix this raster carries valid (and exactly-zero) data
+    all the way to its bounding box's northern edge (measured up to 6_181_075); after
+    it, the polygon used for anchoring is clipped south of the strait and this raster
+    has no valid data north of the cut, so the elevation stack falls back to the DEM.
+    """
+    with rasterio.open(common.INPUTS / "lagoon_bathy_50m.tif") as src:
+        arr = src.read(1, masked=True)
+        valid_rows = np.where(~arr.mask.all(axis=1))[0]
+        max_northing = max(src.xy(r, 0)[1] for r in valid_rows)
+    cut = 6_174_500.0  # mb.STRAIT_CLIP_NORTHING
+    assert max_northing <= cut + 50.0, (
+        f"raster carries valid data up to northing {max_northing:.0f}, "
+        f"{max_northing - cut:.0f} m north of the strait cut at {cut:.0f} -- expected "
+        "nodata there so the elevation stack falls back to dem_5m/emodnet_2022"
+    )
