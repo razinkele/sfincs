@@ -454,14 +454,51 @@ before and after**: the lagoon was already connected at a low threshold, so the
 bar was never the binding constraint. Re-running the event changed no verdict and
 moved two the wrong way. Only the channel-burn fix above moved the physics.
 
-### A third defect, found and not yet fixed
+### Station positions, and a third defect fixed
 
-`inputs/stations.geojson` places the Juodkrantė observation point 1.7 km west of
+`inputs/stations.geojson` placed the Juodkrantė observation point 1.7 km west of
 the lagoon shore, on the seaward side of the Curonian Spit. At that latitude the
-model has two active water bodies — x 316550–317450 and x 318750–325950 — and the
-station's x = 317048 falls in the western one, so it reports Baltic sea level for
-the whole run. Juodkrantė is not among the four scored gauges, so no criterion is
-affected, but the point should be moved.
+model holds two separate water bodies — x 316550–317450 and x 318750–325950 — and
+the station fell in the western one, so it reported Baltic sea level for entire
+runs while the lagoon beside it stood 1.5 m higher. Nothing complained: a station
+on open water is a valid station, whichever water it is on.
+
+Fixed by using LHMT's own published coordinate for `juodkrantes-vms`
+(21.121437, 55.533293, water body *Kuršių marios*), retrieved from api.meteo.lt.
+It lands on a wet lagoon cell unaided and needs no offset at all — the original
+1.3 km westward nudge was both unnecessary and wrong.
+
+**Why the positions drift.** Spec section 8 takes gauge coordinates "from
+`station_pts` in `curonian_db.gpkg` where present, otherwise from the place
+names". `station_pts` holds water-quality stations (LTK1, LTK2, …), not
+hydrological gauges — so the fallback applied to every station here. Each
+position is a place name nudged onto a wet cell, not a surveyed gauge location.
+Measured against LHMT's register:
+
+| station | offset from the LHMT gauge |
+| --- | --- |
+| Šilutė | 430 m |
+| Rusnė | 824 m |
+| Klaipėda | 1844 m (model point is the harbour mouth by design) |
+| Juodkrantė | 2290 m → **0 m** after this fix |
+| **Uostadvaris** | **3583 m** |
+
+**Uostadvaris is the one that matters and is not fixed here.** It is a scored
+gauge — A1 compares the model's peak against it to ±0.15 m — and the model point
+sits 3.6 km from `uostadvario-vms`. In a delta carrying a freshet, water level
+varies over that distance, so some part of A1's error may be a position error
+rather than a model error. Moving it would change a published verdict, so it is
+recorded here rather than changed unilaterally. Nida and Ventė have no entry in
+LHMT's hydrological register and could not be checked at all.
+
+`tests/test_make_geometries.py` now bounds every station against its LHMT
+coordinate and asserts Juodkrantė lies inside the lagoon polygon. Offsets are
+still permitted — they are needed, to reach wet cells — but each must be declared
+with a reason and a limit, so the next one cannot drift across a spit in silence.
+
+The runs already in `results/` carry the old Juodkrantė position in their
+`sfincs.obs`; they were not re-run for this, since Juodkrantė is not among the
+four scored gauges and no criterion depends on it.
 
 ## Reproducing from a clean checkout
 
