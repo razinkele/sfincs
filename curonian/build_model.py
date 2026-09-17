@@ -21,10 +21,37 @@ DATASETS_DEP = [
     {"elevtn": "dem_5m", "reproj_method": "bilinear"},
     {"elevtn": "emodnet_2022", "reproj_method": "bilinear"},
 ]
-# rivwth/rivbed here are fallbacks only, used where the channels.geojson attributes
-# are missing; build_channels() already sets per-channel rivwth/rivbed and those
-# GeoJSON attributes win over these defaults.
-DATASETS_RIV = [{"centerlines": "channels", "rivwth": 200, "rivbed": -4.0}]
+def datasets_riv(inputs: Path = common.INPUTS) -> list[dict]:
+    """One `datasets_riv` entry per channel -- NOT one entry for all three.
+
+    `channel_bed.geojson` (prep/derive_channel_bed.py) gives each channel a
+    per-segment bed profile instead of one constant, via `point_zb`. But
+    `SubgridTableRegular.build()` calls `burn_river_rect` once per `datasets_riv`
+    entry, per ~10 km tile, and passes that entry's *whole* `gdf_zb` straight
+    through unclipped; `nearest()` inside it has no distance cutoff. With a single
+    combined entry, a tile holding only an isolated fragment of one channel had no
+    local zb points to prefer -- every other channel's points were still "nearest"
+    by default, since they were the only candidate -- so a strait-mouth tile
+    measured -6.96 m where every point of the strait is -12.00 m, and an atmata
+    tile picked up the strait's -12.00 m outright. See
+    .superpowers/sdd/2026-09-16-april-2013-nemunas-flood/fix-distributary-bed-report.md
+    for the full trace.
+
+    Splitting into one entry per channel makes that cross-contamination impossible:
+    the strait's own gdf_zb is -12.0 at every point, so any out-of-tile clamp still
+    reads -12.0, and a distributary's out-of-tile clamp can only pick up a value
+    from its *own* profile. `channels.geojson` already carries rivwth/rivbed per
+    feature, so no fallback kwargs are needed here.
+    """
+    channels = gpd.read_file(inputs / "channels.geojson").set_index("name")
+    channel_bed = gpd.read_file(inputs / "channel_bed.geojson")
+    return [
+        {
+            "centerlines": channels.loc[[name]].reset_index(),
+            "point_zb": channel_bed[channel_bed["channel"] == name].reset_index(drop=True),
+        }
+        for name in ("strait", "atmata", "skirvyte")
+    ]
 
 # check_model()'s two tuning numbers, named rather than buried as literals.
 # The probe is a point of permanently open water west of Ventė, in the middle of the
@@ -97,7 +124,7 @@ def build(event: common.Event, run_dir: Path | None = None, subgrid: bool = True
     sf.setup_mask_active(mask="active_region", zmax=10.0, drop_area=0.5, fill_area=10.0, reset_mask=True)
     sf.setup_mask_bounds(btype="waterlevel", include_mask="boundary_ring", reset_bounds=True)
     if subgrid:
-        sf.setup_subgrid(datasets_dep=DATASETS_DEP, datasets_riv=DATASETS_RIV, nr_subgrid_pixels=20, nlevels=10,
+        sf.setup_subgrid(datasets_dep=DATASETS_DEP, datasets_riv=datasets_riv(inputs=static), nr_subgrid_pixels=20, nlevels=10,
                          manning_land=MANNING_LAND, manning_sea=MANNING_SEA, rgh_lev_land=RGH_LEV_LAND,
                          write_dep_tif=True)
         # NOTE: hydromt_sfincs 1.2.2's setup_subgrid() always writes the modern NetCDF

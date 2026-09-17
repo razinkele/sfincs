@@ -54,6 +54,15 @@ channels:
   path: inputs/channels.geojson
   crs: 3346
 
+channel_bed:
+  data_type: GeoDataFrame
+  driver: vector
+  path: inputs/channel_bed.geojson
+  crs: 3346
+  meta:
+    category: bathymetry
+    notes: per-segment river-bed levels (rivbed) from prep/derive_channel_bed.py; DEM thalweg for atmata/skirvyte floored at their old constant, strait unchanged at -12.0. Consumed per-channel by build_model.datasets_riv() (split into one point_zb entry per channel, not read via this catalogue key directly) -- see fix-distributary-bed-report.md for why a single combined point_zb entry corrupted the strait's burn.
+
 active_region:
   data_type: GeoDataFrame
   driver: vector

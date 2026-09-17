@@ -71,6 +71,30 @@ def test_built_model_passes_checks():
     assert (run / "subgrid" / "dep_subgrid.tif").exists()
 
 
+def test_datasets_riv_is_one_entry_per_channel_not_one_combined():
+    """SubgridTableRegular.build() calls burn_river_rect once per datasets_riv entry,
+    per tile, passing that entry's whole gdf_zb through unclipped. A single combined
+    entry let an isolated per-tile fragment of one channel be "nearest" to every
+    OTHER channel's zb points too (nearest() has no distance cutoff) -- measured as
+    a strait-mouth cell reading -6.96 m and an atmata cell reading the strait's
+    -12.00 m (see .superpowers/sdd/2026-09-16-april-2013-nemunas-flood/
+    fix-distributary-bed-report.md). One entry per channel makes that impossible:
+    each entry's gdf_zb only ever carries its own channel's values."""
+    entries = bm.datasets_riv()
+    assert len(entries) == 3
+    by_channel = {}
+    for entry in entries:
+        gdf_riv = entry["centerlines"]
+        gdf_zb = entry["point_zb"]
+        assert set(gdf_riv["name"]) == set(gdf_zb["channel"]), "centerline and zb points must be the same channel"
+        name = gdf_riv["name"].iloc[0]
+        by_channel[name] = (gdf_riv, gdf_zb)
+        assert len(gdf_riv) == 1, f"{name}: centerlines entry must hold only its own channel"
+        assert len(gdf_zb) > 0, f"{name}: point_zb entry must not be empty"
+    assert set(by_channel) == {"strait", "atmata", "skirvyte"}
+    assert (by_channel["strait"][1]["rivbed"] == -12.0).all()
+
+
 def test_check_model_constants_are_named_and_plausible():
     """The connectivity probe and ring tolerance were bare literals inside check_model."""
     assert bm.BND_RING_TOL_M == 150.0
