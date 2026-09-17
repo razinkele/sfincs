@@ -20,9 +20,14 @@ from prep.make_bathymetry import lagoon_polygon
 # retrieved from api.meteo.lt on 2026-09-17, which lands on a wet lagoon cell unaided and
 # needs no offset at all. tests/test_make_geometries.py bounds every station against its
 # LHMT coordinate so this cannot recur silently.
+#
+# Uostadvaris moved for the same reason on 2026-09-17, and it matters more: it is a
+# SCORED gauge. Its place-name position sat 3583 m from uostadvario-vms, and sampling
+# the model field at both showed the difference is worth +0.40 m at the April peak --
+# nearly three times A1's entire +/-0.15 m tolerance. It now uses LHMT's coordinate.
 STATIONS_LONLAT = {
     "Klaipeda": (21.09, 55.715), "Juodkrante": (21.121437, 55.533293), "Nida": (21.0066, 55.3015),
-    "Vente": (21.19, 55.34), "Uostadvaris": (21.24, 55.33), "Rusne": (21.3710, 55.2955),
+    "Vente": (21.19, 55.34), "Uostadvaris": (21.290822, 55.344016), "Rusne": (21.3710, 55.2955),
     "Silute": (21.4816, 55.3392), "Atmata_mouth": (21.23, 55.335), "Zalivino_RU": (21.05, 54.98),
 }
 DELTA_BOX = (325_000, 6_100_000, 370_000, 6_150_000)   # Šilutė / Rusnė / Russian lowlands

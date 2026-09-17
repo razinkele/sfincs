@@ -37,7 +37,14 @@ API = "https://api.meteo.lt/v1"
 # and test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013 pins the gap
 # itself -- so a database refresh, or a further LHMT revision, is caught rather than
 # silently absorbed by either test.
-KNOWN_STALE_BEFORE = {"april_2013": pd.Timestamp("2013-04-11")}
+# Source days before this date are skipped for the named event, because the database
+# disagreed with LHMT there. Empty since 2026-09-17: curonian_db.gpkg's source_id 167
+# (Smalininkai, Jan-Jun 2013) was re-ingested from LHMT's current published series --
+# 124 of its 181 days had come from an older .xls extraction and differed by up to
+# 142 m3/s. April therefore compares its full window again. The mechanism is kept
+# because the next stale block will want it: blocks 166 (Nov-Dec 2012) and 169
+# (Jan-Apr 2014) still carry their original .xls values and still differ from the API.
+KNOWN_STALE_BEFORE: dict = {}
 
 
 def lhmt(event) -> pd.Series:
@@ -64,11 +71,10 @@ def _midnights(event):
 def test_discharge_forcing_reproduces_lhmt_with_the_documented_lag(event):
     """dis.csv at time T must carry LHMT's reading from T - NEMUNAS_LAG_DAYS.
 
-    Scoped to skip source days before KNOWN_STALE_BEFORE[event.name] (April only):
-    the database's own record disagrees with LHMT there for reasons that are
-    pinned, not fixed, by test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013
-    below. Every other event, and every day this event's database agrees on, is
-    still checked at the full 0.5 m3/s tolerance.
+    Source days before KNOWN_STALE_BEFORE[event.name] are skipped, for events that
+    have an entry. That dict is empty as of 2026-09-17 -- the one block it covered
+    was re-ingested from LHMT -- so every day of every event is checked at the full
+    0.5 m3/s tolerance. The skip stays for the next stale block.
     """
     obs, nem = lhmt(event), model(event)[1]
     stale_before = KNOWN_STALE_BEFORE.get(event.name)
@@ -93,12 +99,11 @@ def test_the_lag_is_applied_in_the_right_direction(event):
     This is the regression the value check alone cannot catch: Nemunas discharge
     changes slowly, so shifting it a day still gives numbers of the right size.
 
-    Scoped exactly like test_discharge_forcing_reproduces_lhmt_with_the_documented_lag:
-    restricted to midnights whose *correctly-lagged* source day is at or after
-    KNOWN_STALE_BEFORE[event.name] (April only; a no-op for Xaver). Without this,
-    the six stale April spin-up days can never match the fixture under any lag, so
-    same_day/wrong_way could never reach the un-scoped n and both assertions below
-    would be unfalsifiable for April -- passing even with no lag applied at all.
+    Scoped exactly like test_discharge_forcing_reproduces_lhmt_with_the_documented_lag,
+    and for a reason worth keeping even now that KNOWN_STALE_BEFORE is empty: days the
+    database disagrees on can never match the fixture under ANY lag, so if they were
+    counted, same_day/wrong_way could never reach n and both assertions below would be
+    unfalsifiable -- passing even with no lag applied at all.
     """
     obs, nem = lhmt(event), model(event)[1]
     stale_before = KNOWN_STALE_BEFORE.get(event.name)
@@ -128,47 +133,40 @@ def test_minija_column_is_the_documented_constant(event):
 
 
 @pytest.mark.integration
-def test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013():
-    """Pins the known database/LHMT gap so it stays visible rather than swept under
-    the scoping in test_discharge_forcing_reproduces_lhmt_with_the_documented_lag.
+def test_db_smalininkai_agrees_with_lhmt_after_the_2026_09_17_reingest():
+    """The database's Smalininkai block must match LHMT's published series.
 
-    curonian_db.gpkg's Smalininkai discharge for 2013-03-26..2013-04-10 (all one
-    source, source_id 167 -- confirmed not a file-boundary artifact) disagrees with
-    the LHMT fixture fetched 2026-09-16 by up to 53 m3/s. Bounding it here means a
-    database refresh, or a further LHMT revision either direction, breaks this
-    assertion and gets a human's attention instead of silently changing what the
-    other tests skip over.
+    Succeeds test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013, which
+    pinned the gap while it existed. On 2026-09-17 source_id 167 (Jan-Jun 2013) was
+    re-ingested from api.meteo.lt: 124 of its 181 days had come from an older
+    extraction, `smalininkai 2013 01-06.xls`, and differed by up to 142 m3/s. The
+    block mean moved 701.7 -> 683.4 m3/s.
+
+    This asserts the refresh holds. It fails if the block is restored from the .xls,
+    if LHMT revises again, or if a partial re-ingest leaves some days behind -- each
+    of which a human should see rather than have silently absorbed into the forcing.
+
+    Scope note: only block 167 was refreshed. Blocks 166 (Nov-Dec 2012) and 169
+    (Jan-Apr 2014) still carry their original .xls values and still differ from the
+    API, so a step may exist at the block boundaries. Block 168 (Jul-Dec 2013), which
+    is where the Xaver event lives, already agreed exactly and was not touched.
     """
     event = common.event("april_2013")
     obs = lhmt(event)
-    range_start = event.data_window[0]
-    range_end = (KNOWN_STALE_BEFORE["april_2013"] - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     df = common.read_table(
         "SELECT date, discharge_m3s FROM river_discharge WHERE river='Nemunas' AND gauge='Smalininkai' "
-        "AND date BETWEEN ? AND ?", (range_start, range_end))
+        "AND date BETWEEN ? AND ?", event.data_window)
     db = pd.Series(df["discharge_m3s"].values, index=pd.to_datetime(df["date"]))
 
-    compared, max_diff = 0, 0.0
+    compared = 0
     for day, q in db.items():
         if day not in obs.index:
             continue
-        diff = abs(q - obs.loc[day])
-        max_diff = max(max_diff, diff)
-        assert diff <= 55.0, (
-            f"{day:%Y-%m-%d}: db {q} vs LHMT {obs.loc[day]}, diff {diff} exceeds the known ~53 m3/s gap")
+        assert q == pytest.approx(obs.loc[day], abs=0.5), (
+            f"{day:%Y-%m-%d}: db {q} vs LHMT {obs.loc[day]} -- the Jan-Jun 2013 re-ingest has "
+            "regressed, or LHMT has revised again; look before changing this tolerance")
         compared += 1
-    assert compared >= 14, f"only {compared} days compared; expected the full 26 Mar-10 Apr stretch"
-    # Pins the *magnitude*, not just the existence, of the gap: an upper bound alone
-    # (diff <= 55.0 above) would stay green if a partial refresh fixed fifteen of the
-    # sixteen days and left one off by a few m3/s -- exactly the silent drift this
-    # test exists to catch. 53.0 is the maximum observed on 2026-09-16 (2013-04-01,
-    # DB 473 vs LHMT 526); +-2.0 is headroom for float/round-trip noise, not for a
-    # real revision. If this fails because the gap shrank or moved, that is the
-    # database being refreshed or LHMT revising again -- update the pin and
-    # KNOWN_STALE_BEFORE deliberately, do not just widen the tolerance.
-    assert max_diff == pytest.approx(53.0, abs=2.0), (
-        f"known database/LHMT gap changed shape: max diff is now {max_diff}, was 53.0 on 2026-09-16 -- "
-        "a human should look before this pin is updated")
+    assert compared >= 40, f"only {compared} days compared; expected the full April data window"
 
 
 @pytest.mark.integration
