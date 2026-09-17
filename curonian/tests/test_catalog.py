@@ -14,7 +14,8 @@ def _geom(minx, miny, maxx, maxy):
 @pytest.mark.integration
 def test_catalog_sources_load():
     dc = DataCatalog(data_libs=[str(common.ROOT / "data_catalog.yml")])
-    for name in ("dem_5m", "lagoon_bathy_50m", "emodnet_2022", "lagoon_boundary", "channels", "active_region", "boundary_ring"):
+    for name in ("dem_5m", "lagoon_bathy_50m", "emodnet_2022", "lagoon_boundary", "channels", "channel_bed",
+                 "active_region", "boundary_ring"):
         assert name in dc.sources, name
     dem = dc.get_rasterdataset("dem_5m", geom=_geom(330_000, 6_115_000, 332_000, 6_117_000), buffer=0)
     # DEM's WKT is non-canonical LKS-94; to_epsg(min_confidence=20) identifies EPSG:3346
@@ -26,3 +27,6 @@ def test_catalog_sources_load():
     assert emod.raster.crs.is_geographic and emod.name == "elevtn" and float(emod.min()) < -10
     ch = dc.get_geodataframe("channels")
     assert set(ch["name"]) == {"strait", "atmata", "skirvyte"}
+    zb = dc.get_geodataframe("channel_bed")
+    assert set(zb["channel"]) == {"strait", "atmata", "skirvyte"}
+    assert "rivbed" in zb.columns
