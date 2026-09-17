@@ -1,4 +1,7 @@
+import geopandas as gpd
+import numpy as np
 import pytest
+from shapely.geometry import LineString
 
 import common
 import build_model as bm
@@ -93,6 +96,73 @@ def test_datasets_riv_is_one_entry_per_channel_not_one_combined():
         assert len(gdf_zb) > 0, f"{name}: point_zb entry must not be empty"
     assert set(by_channel) == {"strait", "atmata", "skirvyte"}
     assert (by_channel["strait"][1]["rivbed"] == -12.0).all()
+
+
+def _flat_elevation_da(nx=10, ny=10, res=100.0, x0=1000.0, y0=1000.0):
+    """A tiny synthetic elevation DataArray with the hydromt raster accessor wired
+    up -- just enough for burn_river_rect() to clip/mask/reproject against."""
+    import xarray as xr
+
+    xs = x0 + res * (np.arange(nx) + 0.5)
+    ys = y0 + res * (np.arange(ny) + 0.5)
+    da = xr.DataArray(np.zeros((ny, nx), dtype="float32"), dims=("y", "x"),
+                       coords={"y": ys[::-1], "x": xs}, name="elevtn")
+    da.raster.set_crs(common.CRS)
+    da.raster.set_nodata(np.nan)
+    return da
+
+
+def test_burn_river_rect_bleeds_across_a_combined_entry_but_not_a_split_one():
+    """Regression guard for the cross-channel contamination this fix discovered and
+    had to work around (see .superpowers/sdd/2026-09-16-april-2013-nemunas-flood/
+    fix-distributary-bed-report.md).
+
+    hydromt_sfincs.workflows.bathymetry.burn_river_rect() clips `gdf_riv` to the
+    elevation raster's own extent, but NOT `gdf_zb` -- and its nearest()-based
+    point-to-line assignment has no distance cutoff. If one call's `gdf_riv` +
+    `gdf_zb` cover multiple channels and the elevation raster (a "tile", in
+    SubgridTableRegular's real per-block burn) happens to contain only one
+    channel's geometry, every OTHER channel's zb points are still "nearest" to
+    that one local line by default and corrupt it. This is exactly what produced
+    a strait cell at -6.96 m (every one of its own zb points is -12.0) and an
+    atmata cell at the strait's own -12.00 m during this fix's first, literal-spec
+    attempt (one combined `datasets_riv` entry for all three channels).
+
+    Sabotage: a tiny elevation raster covers channel A's geometry only -- a
+    stand-in for an isolated per-tile fragment. Channel B sits far outside it.
+    A **combined** gdf_riv/gdf_zb (both channels together, the broken shape) must
+    reproduce the bleed: A's cells stop being uniformly -12.0. Two **separate**
+    calls, one per channel -- exactly what build_model.datasets_riv() does -- must
+    not: A's cells stay exactly at A's own -12.0 regardless of what B says.
+    """
+    from hydromt_sfincs.workflows.bathymetry import burn_river_rect
+
+    line_a = LineString([(1000.0, 1500.0), (1900.0, 1500.0)])   # inside the tile
+    line_b = LineString([(50_000.0, 50_000.0), (50_900.0, 50_000.0)])  # far outside it
+
+    gdf_riv = gpd.GeoDataFrame({"name": ["A", "B"], "rivwth": [100.0, 100.0]},
+                               geometry=[line_a, line_b], crs=common.CRS)
+    gdf_zb = gpd.GeoDataFrame(
+        {"channel": ["A", "B"], "rivbed": [-12.0, -3.0]},
+        geometry=[line_a.interpolate(0.5, normalized=True), line_b.interpolate(0.5, normalized=True)],
+        crs=common.CRS)
+
+    da_combined, _ = burn_river_rect(da_elv=_flat_elevation_da(), gdf_riv=gdf_riv.copy(), gdf_zb=gdf_zb.copy())
+    burned_combined = da_combined.values[da_combined.values < -1.0]
+    assert burned_combined.size > 0, "test setup produced no burned cells at all"
+    assert not np.allclose(burned_combined, -12.0, atol=0.05), (
+        "expected the known combined-entry bleed to reproduce here (channel A pulled "
+        "away from its own -12.0 by channel B's far-away -3.0); if this now holds, "
+        "hydromt_sfincs may have fixed the underlying issue upstream -- re-check "
+        "before loosening this guard")
+
+    gdf_riv_a = gdf_riv[gdf_riv["name"] == "A"].copy()
+    gdf_zb_a = gdf_zb[gdf_zb["channel"] == "A"].copy()
+    da_split, _ = burn_river_rect(da_elv=_flat_elevation_da(), gdf_riv=gdf_riv_a, gdf_zb=gdf_zb_a)
+    burned_split = da_split.values[da_split.values < -1.0]
+    assert burned_split.size > 0
+    assert np.allclose(burned_split, -12.0, atol=0.01), \
+        "a channel burned on its own must stay exactly at its own rivbed"
 
 
 def test_check_model_constants_are_named_and_plausible():
