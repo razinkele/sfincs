@@ -78,8 +78,9 @@ LHMT_GAUGES = {
     # station:      (lon, lat, max offset m, why the offset is what it is)
     "Klaipeda":     (21.11915,  55.713148, 2000, "model point is the harbour mouth, not the seaport gauge"),
     "Juodkrante":   (21.121437, 55.533293,  200, "LHMT coordinate used directly; lands on a wet lagoon cell"),
-    "Uostadvaris":  (21.290822, 55.344016, 4000, "KNOWN ISSUE: 3.6 km from the gauge A1 is scored against, "
-                                                 "inherited from a place-name position; see README"),
+    "Uostadvaris":  (21.290822, 55.344016,  200, "LHMT coordinate used directly; scored gauge, so the "
+                                                 "3583 m place-name offset it replaced was worth +0.40 m at "
+                                                 "the April peak"),
     "Rusne":        (21.3803,   55.30066,  1000, "nudged onto a wet cell in the Atmata"),
     "Silute":       (21.475836, 55.337168,  600, "nudged onto a wet cell"),
 }
