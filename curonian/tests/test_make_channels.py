@@ -62,6 +62,53 @@ def test_main_keeps_existing_osm_file_when_fetch_fails(tmp_path, monkeypatch):
     assert result["source"].tolist() == ["fixed", "osm", "osm"]
 
 
+def test_main_keeps_existing_thalweg_strait_when_fetch_fails(tmp_path, monkeypatch):
+    """A "thalweg"-sourced strait (see prep/derive_strait.py) is as good as "fixed" --
+    the keep-existing check on Overpass failure must not reject it and fall through
+    to overwriting it with the fallback coordinates."""
+    osm_dict = {"atmata": LineString([(21.37, 55.30), (21.25, 55.335)]),
+                "skirvyte": LineString([(21.37, 55.30), (21.28, 55.27)])}
+    gdf = mc.build_channels(osm_dict)
+    derived_strait = LineString([(320550, 6168750), (319650, 6177950)])
+    gdf.loc[gdf["name"] == "strait", "geometry"] = [derived_strait]
+    gdf["source"] = ["thalweg", "osm", "osm"]
+    out_path = tmp_path / "channels.geojson"
+    gdf.to_file(out_path, driver="GeoJSON")
+    original_mtime = out_path.stat().st_mtime
+
+    monkeypatch.setattr(mc, "fetch_osm_rivers", lambda: (_ for _ in ()).throw(RuntimeError("down")))
+
+    result = mc.main(out=out_path)
+    assert out_path.stat().st_mtime == original_mtime  # file not rewritten
+    assert result["source"].tolist() == ["thalweg", "osm", "osm"]
+    assert result.set_index("name").loc["strait", "geometry"].equals(derived_strait)
+
+
+def test_main_keeps_derived_strait_when_overpass_succeeds(tmp_path, monkeypatch):
+    """A live, successful Overpass fetch refreshes atmata/skirvyte but must not
+    silently clobber a mask-derived strait with the hardcoded STRAIT_LONLAT fallback
+    -- that regression is exactly what shipped a strait 42 % across the dune ridge."""
+    initial_osm = {"atmata": LineString([(21.37, 55.30), (21.25, 55.335)]),
+                   "skirvyte": LineString([(21.37, 55.30), (21.28, 55.27)])}
+    gdf = mc.build_channels(initial_osm)
+    derived_strait = LineString([(320550, 6168750), (319650, 6177950)])
+    gdf.loc[gdf["name"] == "strait", "geometry"] = [derived_strait]
+    gdf["source"] = ["thalweg", "osm", "osm"]
+    out_path = tmp_path / "channels.geojson"
+    gdf.to_file(out_path, driver="GeoJSON")
+
+    new_osm = {"atmata": LineString([(21.30, 55.31), (21.20, 55.34)]),
+               "skirvyte": LineString([(21.30, 55.31), (21.22, 55.28)])}
+    monkeypatch.setattr(mc, "fetch_osm_rivers", lambda: new_osm)
+
+    result = mc.main(out=out_path).set_index("name")
+    assert result.loc["strait", "source"] == "thalweg"
+    assert result.loc["strait", "geometry"].equals(derived_strait)
+    assert result.loc["atmata", "source"] == "osm"
+    assert result.loc["atmata", "geometry"].length == pytest.approx(
+        mc.to_3346(new_osm["atmata"]).length, rel=1e-6)
+
+
 def test_main_exits_2_without_allow_fallback_when_no_file(tmp_path, monkeypatch):
     """When Overpass fails, no existing file, and allow_fallback=False, exit(2)."""
     # Mock fetch_osm_rivers to raise
@@ -105,6 +152,40 @@ def test_build_channels_raises_valueerror_on_implausible_strait(monkeypatch):
     monkeypatch.setattr(mc, "STRAIT_LONLAT", [(21.15, 55.62), (21.1501, 55.6201)])   # ~13 m long
     with pytest.raises(ValueError, match="strait"):
         mc.build_channels(None)
+
+
+@pytest.mark.integration
+def test_burned_channels_lie_on_active_cells():
+    """setup_subgrid burns z_zmin along a channel centreline silently: a point that
+    lands on an inactive cell is just skipped, with no warning. That is how a strait
+    centreline running 42% through the dune ridge survived two hindcasts and a
+    review (see .superpowers/sdd/2026-09-16-april-2013-nemunas-flood/
+    fix-strait-centreline-report.md). Densify each centreline at the model's grid
+    resolution (common.DX) -- roughly what setup_subgrid itself samples along the
+    line -- and require nearly every point to land on an active cell.
+
+    Uses runs/xaver_2013's mask as ground truth: it is set by setup_dep +
+    setup_mask_active + setup_mask_bounds, all of which precede the channel burn
+    (see build_model.build()), so it is unaffected by channels.geojson and does not
+    need to be rebuilt for this check.
+    """
+    run = common.RUN_XAVER
+    if not (run / "sfincs.msk").exists():
+        pytest.skip("run build_model.py first")
+    msk, xs, ys = common.read_active_mask(run)
+    gdf = gpd.read_file(common.INPUTS / "channels.geojson").set_index("name")
+    bad = {}
+    for name, geom in gdf["geometry"].items():
+        pts = list(geom.segmentize(common.DX).coords)
+        n_inactive = sum(1 for x, y in pts if common.mask_value_at(msk, xs, ys, x, y) == 0)
+        frac = n_inactive / len(pts)
+        # Tight on purpose: at ~100 m spacing even 1% is a real ~100+ m throttle in a
+        # channel this narrow, and all three committed channels currently score 0%.
+        if frac > 0.01:
+            bad[name] = (n_inactive, len(pts), frac)
+    assert not bad, (
+        "channel centreline(s) fall mostly on inactive cells, so their burn would "
+        f"leave a gap in the subgrid bathymetry: {bad}")
 
 
 def test_main_lets_a_client_bug_propagate(tmp_path, monkeypatch):

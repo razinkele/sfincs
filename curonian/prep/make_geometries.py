@@ -9,11 +9,25 @@ from shapely.ops import unary_union
 import common
 from prep.make_bathymetry import lagoon_polygon
 
-# Juodkrante, Nida, Rusne and Silute are offset 0.2-1.2 km from the gauge positions
-# in the spec so that they sit on wet model cells (see README Run log).
+# Spec section 8 takes gauge coordinates "from `station_pts` in curonian_db.gpkg where
+# present, otherwise from the place names". station_pts turns out to hold water-quality
+# stations (LTK1, LTK2, ...), not hydrological gauges, so every position here came from a
+# place name and was then nudged to sit on a wet model cell (see README Run log).
+#
+# Juodkrante was nudged the WRONG WAY: 1.3 km west put it across the Curonian Spit, in the
+# Baltic, where it reported sea level for entire runs. It now uses LHMT's own published
+# coordinate for juodkrantes-vms (21.121437, 55.533293; water body "Kursiu marios"),
+# retrieved from api.meteo.lt on 2026-09-17, which lands on a wet lagoon cell unaided and
+# needs no offset at all. tests/test_make_geometries.py bounds every station against its
+# LHMT coordinate so this cannot recur silently.
+#
+# Uostadvaris moved for the same reason on 2026-09-17, and it matters more: it is a
+# SCORED gauge. Its place-name position sat 3583 m from uostadvario-vms, and sampling
+# the model field at both showed the difference is worth +0.40 m at the April peak --
+# nearly three times A1's entire +/-0.15 m tolerance. It now uses LHMT's coordinate.
 STATIONS_LONLAT = {
-    "Klaipeda": (21.09, 55.715), "Juodkrante": (21.1003, 55.5500), "Nida": (21.0066, 55.3015),
-    "Vente": (21.19, 55.34), "Uostadvaris": (21.24, 55.33), "Rusne": (21.3710, 55.2955),
+    "Klaipeda": (21.09, 55.715), "Juodkrante": (21.121437, 55.533293), "Nida": (21.0066, 55.3015),
+    "Vente": (21.19, 55.34), "Uostadvaris": (21.290822, 55.344016), "Rusne": (21.3710, 55.2955),
     "Silute": (21.4816, 55.3392), "Atmata_mouth": (21.23, 55.335), "Zalivino_RU": (21.05, 54.98),
 }
 DELTA_BOX = (325_000, 6_100_000, 370_000, 6_150_000)   # Šilutė / Rusnė / Russian lowlands

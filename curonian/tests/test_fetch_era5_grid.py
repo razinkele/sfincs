@@ -7,15 +7,18 @@ import xarray as xr
 import common
 from prep import fetch_era5_grid as feg
 
+XAVER = common.EVENTS["xaver_2013"]
+APRIL = common.EVENTS["april_2013"]
 
-def _synthetic_raw(extra_hours=6):
+
+def _synthetic_raw(event=XAVER, extra_hours=6):
     """Synthetic raw-CDS-shaped ERA5 dataset: dims (valid_time, latitude, longitude),
     latitude ascending, longitude ascending, an `expver` per-time coordinate (as real
     new-CDS single-levels downloads carry), values in the physically-valid range, and
-    a time span padded past [TREF-1h, TSTOP+1h] on both ends so slicing has something
-    to cut off."""
-    t0 = common.TREF - pd.Timedelta(hours=1 + extra_hours)
-    t1 = common.TSTOP + pd.Timedelta(hours=1 + extra_hours)
+    a time span padded past [event.tref-1h, event.tstop+1h] on both ends so slicing
+    has something to cut off."""
+    t0 = event.tref - pd.Timedelta(hours=1 + extra_hours)
+    t1 = event.tstop + pd.Timedelta(hours=1 + extra_hours)
     times = pd.date_range(t0, t1, freq="h")
     lat = np.array([54.5, 55.0, 55.5])       # ascending -- to_hydromt must flip to descending
     lon = np.array([20.5, 21.0, 21.5])       # ascending already
@@ -36,7 +39,7 @@ def _synthetic_raw(extra_hours=6):
 
 
 def test_to_hydromt_renames_orients_and_slices():
-    ds = feg.to_hydromt(_synthetic_raw())
+    ds = feg.to_hydromt(_synthetic_raw(), XAVER)
     assert set(ds.data_vars) == {"wind10_u", "wind10_v", "press_msl"}
     assert "expver" not in ds.variables and "number" not in ds.variables
     for v in ds.data_vars:
@@ -45,29 +48,44 @@ def test_to_hydromt_renames_orients_and_slices():
     x = ds["x"].values
     assert list(y) == sorted(y, reverse=True), "y must be north-up (descending)"
     assert list(x) == sorted(x), "x must be ascending"
-    # padded input hours outside [TREF-1h, TSTOP+1h] must be sliced away
-    assert ds["time"].values.min() == np.datetime64(common.TREF - pd.Timedelta("1h"))
-    assert ds["time"].values.max() == np.datetime64(common.TSTOP + pd.Timedelta("1h"))
+    # padded input hours outside [XAVER.tref-1h, XAVER.tstop+1h] must be sliced away
+    assert ds["time"].values.min() == np.datetime64(XAVER.tref - pd.Timedelta("1h"))
+    assert ds["time"].values.max() == np.datetime64(XAVER.tstop + pd.Timedelta("1h"))
+
+
+def test_to_hydromt_slices_to_a_non_xaver_event():
+    """Xaver's tref/tstop equal common.TREF/TSTOP, so a test that only ever passes
+    XAVER cannot tell a genuinely event-driven slice from one still hardcoded to
+    those module constants. April's window is nowhere near November/December, so
+    this only passes if to_hydromt actually reads event.tref/event.tstop."""
+    ds = feg.to_hydromt(_synthetic_raw(APRIL), APRIL)
+    assert ds["time"].values.min() == np.datetime64(APRIL.tref - pd.Timedelta("1h"))
+    assert ds["time"].values.max() == np.datetime64(APRIL.tstop + pd.Timedelta("1h"))
+
+
+def test_era5_request_months_come_from_the_event():
+    assert feg.request(common.event("xaver_2013"))["month"] == ["11", "12"]
+    assert feg.request(common.event("april_2013"))["month"] == ["04", "05"]
 
 
 def test_to_hydromt_raises_on_nan():
     ds = _synthetic_raw()
     ds["u10"][10, 0, 0] = np.nan
     with pytest.raises(AssertionError):
-        feg.to_hydromt(ds)
+        feg.to_hydromt(ds, XAVER)
 
 
 def test_to_hydromt_raises_on_bad_pressure():
     ds = _synthetic_raw()
     ds["msl"][:, :, :] = 50_000.0   # far below the 90000-110000 Pa sanity range
     with pytest.raises(AssertionError):
-        feg.to_hydromt(ds)
+        feg.to_hydromt(ds, XAVER)
 
 
 def test_to_hydromt_accepts_already_named_time_coordinate():
     """Older-style CDS files use `time` instead of `valid_time`; must pass through unrenamed."""
     ds = _synthetic_raw().rename({"valid_time": "time"})
-    out = feg.to_hydromt(ds)
+    out = feg.to_hydromt(ds, XAVER)
     assert "time" in out.coords
 
 
@@ -99,7 +117,7 @@ def test_nida_check_near_zero_on_matching_point():
 
 @pytest.mark.integration
 def test_real_era5_grid_covers_the_period():
-    path = common.INPUTS / "era5_grid_xaver.nc"
+    path = XAVER.inputs_dir / "era5_grid.nc"
     if not path.exists():
         pytest.skip("run prep.fetch_era5_grid first")
     with xr.open_dataset(path) as ds:

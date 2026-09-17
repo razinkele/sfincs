@@ -5,6 +5,7 @@ The download is a zip of monthly NetCDF files with a `stations` dimension.
 """
 from __future__ import annotations
 
+import argparse
 import zipfile
 from pathlib import Path
 
@@ -15,12 +16,11 @@ import xarray as xr
 import common
 
 DATASET = "sis-water-level-change-timeseries-cmip6"
-REQUEST = {
+REQUEST_BASE = {
     "variable": ["total_water_level"],
     "experiment": ["reanalysis"],
     "temporal_aggregation": ["hourly"],
     "year": ["2013"],
-    "month": ["11", "12"],
     # "model" is not part of the reanalysis experiment's constraints (only
     # historical/future CMIP6 runs need it), but "version" is required even
     # for reanalysis; v2 is deprecated, v3 is current (checked against the
@@ -32,13 +32,22 @@ LON_NAMES = ("station_x_coordinate", "lon", "longitude")
 LAT_NAMES = ("station_y_coordinate", "lat", "latitude")
 
 
-def download(target: Path = common.INPUTS / "gtsm_2013_11_12.zip") -> Path:
+def request(event: common.Event) -> dict:
+    return {**REQUEST_BASE, "month": list(event.gtsm_months)}
+
+
+def target_for(event: common.Event) -> Path:
+    return event.inputs_dir / "gtsm.zip"
+
+
+def download(event: common.Event, target: Path | None = None) -> Path:
     import cdsapi
+    target = target or target_for(event)
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.stat().st_size > 1_000_000:
         print(f"using cached {target}")
         return target
-    cdsapi.Client().retrieve(DATASET, REQUEST, str(target))
+    cdsapi.Client().retrieve(DATASET, request(event), str(target))
     return target
 
 
@@ -93,8 +102,9 @@ def extract_nearest(zip_path: Path, lonlat=common.KLAIPEDA_MOUTH_LONLAT):
     return series_from_files([outdir / n for n in names], lonlat)
 
 
-def main(out: Path = common.INPUTS / "gtsm_klaipeda.csv") -> pd.Series:
-    zip_path = download()
+def main(event: common.Event, out: Path | None = None) -> pd.Series:
+    out = out or event.inputs_dir / "gtsm_klaipeda.csv"
+    zip_path = download(event)
     series, meta = extract_nearest(zip_path)
     if meta["distance_km"] >= 60:
         raise ValueError(f"nearest GTSM station is {meta['distance_km']:.0f} km from the mouth "
@@ -104,5 +114,11 @@ def main(out: Path = common.INPUTS / "gtsm_klaipeda.csv") -> pd.Series:
     return series
 
 
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
+    return p.parse_args(argv)
+
+
 if __name__ == "__main__":
-    main()
+    main(common.event(parse_args().event))

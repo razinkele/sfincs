@@ -1,10 +1,10 @@
 """Parser contract between validate.py's report format and the viewer.
 
-These run against the committed report in curonian/results/xaver_2013/, so a
-change to validate.py's output format fails here instead of silently emptying
-a panel on laguna.ku.lt.
+These run against the committed reports under curonian/results/ (one parametrized
+test sweeps every published variant), so a change to validate.py's output format
+fails here instead of silently emptying a panel on laguna.ku.lt.
 
-    micromamba run -n hydromt-sfincs python -m pytest app/ -q
+    micromamba run -n shiny python -m pytest app/ -q
 """
 
 import pytest
@@ -43,7 +43,19 @@ def test_info_lines_are_kept_but_not_scored():
     assert sentence.startswith("4 of 4")
 
 
-def test_marginal_pass_is_reported_but_flagged():
+def test_marginal_pass_is_reported_but_flagged(monkeypatch):
+    """A 'met (marginal)' verdict must read as a warning, not a clean pass.
+
+    This used to lean on Xaver's C2, which was marginal at the time. The
+    2026-09-17 re-run on corrected strait geometry turned C2 into a clean
+    'met', so there is no longer a marginal verdict anywhere in the committed
+    reports. The behaviour still needs a test, so the verdict is injected
+    rather than borrowed from whichever run happens to be marginal today.
+    """
+    real = sd.criteria(VARIANT)
+    marginal = [dict(c, verdict="met (marginal)") if i == 0 else c
+                for i, c in enumerate(real)]
+    monkeypatch.setattr(sd, "criteria", lambda v: marginal)
     colour, sentence = viewer.headline(VARIANT)
     assert colour == "warning"
     assert "marginal" in sentence
@@ -70,7 +82,7 @@ def test_unscored_verdicts_leave_the_denominator(monkeypatch):
 
 
 def test_flooded_area_is_read_from_the_report():
-    assert sd.flooded_area_km2(VARIANT) == pytest.approx(165.6)
+    assert sd.flooded_area_km2(VARIANT) == pytest.approx(157.3)
 
 
 def test_both_metric_tables_are_parsed():
@@ -100,3 +112,21 @@ def test_run_summary_reads_the_model_setup():
     summary = dict(sd.run_summary(VARIANT))
     assert summary["Projection"] == "EPSG:3346"
     assert "1000 x 1100 cells" in summary["Grid"]
+
+
+@pytest.mark.parametrize("variant", sd.list_variants())
+def test_every_variant_exposes_a_whole_period_and_a_scored_window(variant):
+    """Both headings must parse, whatever the event calls its scored window.
+
+    Xaver's report says "Storm window"; April's says "Scoring window". The regex
+    is the only thing that finds either, and a miss empties the metrics panel
+    silently rather than failing.
+    """
+    found = sd.periods(variant)
+    assert "Whole period" in found
+    scored = [k for k in found if k != "Whole period"]
+    assert len(scored) == 1, f"{variant}: expected one scored window, got {scored}"
+    # metric_tables() keys its tables by the full heading line ("name: range"),
+    # periods() by the bare name -- same regex, same input, so the two must
+    # describe the same headings once reassembled the same way.
+    assert set(sd.metric_tables(variant)) == {f"{k}: {v}" for k, v in found.items()}

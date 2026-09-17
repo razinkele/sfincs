@@ -1,4 +1,5 @@
-"""Assemble the Curonian Lagoon SFINCS model for Storm Xaver with HydroMT-SFINCS 1.2."""
+"""Assemble the Curonian Lagoon SFINCS model for one hindcast event (--event) with
+HydroMT-SFINCS 1.2."""
 from __future__ import annotations
 
 import argparse
@@ -20,10 +21,37 @@ DATASETS_DEP = [
     {"elevtn": "dem_5m", "reproj_method": "bilinear"},
     {"elevtn": "emodnet_2022", "reproj_method": "bilinear"},
 ]
-# rivwth/rivbed here are fallbacks only, used where the channels.geojson attributes
-# are missing; build_channels() already sets per-channel rivwth/rivbed and those
-# GeoJSON attributes win over these defaults.
-DATASETS_RIV = [{"centerlines": "channels", "rivwth": 200, "rivbed": -4.0}]
+def datasets_riv(inputs: Path = common.INPUTS) -> list[dict]:
+    """One `datasets_riv` entry per channel -- NOT one entry for all three.
+
+    `channel_bed.geojson` (prep/derive_channel_bed.py) gives each channel a
+    per-segment bed profile instead of one constant, via `point_zb`. But
+    `SubgridTableRegular.build()` calls `burn_river_rect` once per `datasets_riv`
+    entry, per ~10 km tile, and passes that entry's *whole* `gdf_zb` straight
+    through unclipped; `nearest()` inside it has no distance cutoff. With a single
+    combined entry, a tile holding only an isolated fragment of one channel had no
+    local zb points to prefer -- every other channel's points were still "nearest"
+    by default, since they were the only candidate -- so a strait-mouth tile
+    measured -6.96 m where every point of the strait is -12.00 m, and an atmata
+    tile picked up the strait's -12.00 m outright. See
+    .superpowers/sdd/2026-09-16-april-2013-nemunas-flood/fix-distributary-bed-report.md
+    for the full trace.
+
+    Splitting into one entry per channel makes that cross-contamination impossible:
+    the strait's own gdf_zb is -12.0 at every point, so any out-of-tile clamp still
+    reads -12.0, and a distributary's out-of-tile clamp can only pick up a value
+    from its *own* profile. `channels.geojson` already carries rivwth/rivbed per
+    feature, so no fallback kwargs are needed here.
+    """
+    channels = gpd.read_file(inputs / "channels.geojson").set_index("name")
+    channel_bed = gpd.read_file(inputs / "channel_bed.geojson")
+    return [
+        {
+            "centerlines": channels.loc[[name]].reset_index(),
+            "point_zb": channel_bed[channel_bed["channel"] == name].reset_index(drop=True),
+        }
+        for name in ("strait", "atmata", "skirvyte")
+    ]
 
 # check_model()'s two tuning numbers, named rather than buried as literals.
 # The probe is a point of permanently open water west of Ventė, in the middle of the
@@ -54,20 +82,41 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--no-subgrid", action="store_true", help="skip setup_subgrid (see README Limitations)")
     p.add_argument("--wind", choices=("uniform", "grid"), default="uniform",
-                    help="uniform: the Nida point series (wind.csv); grid: gridded ERA5 wind (era5_grid_xaver.nc)")
+                    help="uniform: the Nida point series (wind.csv); grid: gridded ERA5 wind (era5_grid.nc)")
     p.add_argument("--pressure", action="store_true",
-                    help="also add gridded ERA5 mean sea level pressure forcing (needs --wind grid's era5_grid_xaver.nc)")
-    p.add_argument("--run-name", default="xaver_2013", help="subdirectory of runs/ to build into")
+                    help="also add gridded ERA5 mean sea level pressure forcing (needs --wind grid's era5_grid.nc)")
+    p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
+    p.add_argument("--run-name", default=None, help="subdirectory of runs/; defaults to the event name")
     args = p.parse_args(argv)
     if args.pressure and args.wind != "grid":
         raise SystemExit("--pressure requires --wind grid")
+    args.run_name = args.run_name or args.event
     return args
 
 
-def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "uniform", pressure: bool = False):
+def config_for(event: common.Event, zs_boundary: float) -> dict:
+    """SFINCS config for this event. zsini is the event's if it sets one.
+
+    Xaver leaves zsini=None and takes the sea boundary's first value, which was
+    within 0.05-0.11 m of its lagoon gauges. April's lagoon stands ~0.23 m above
+    the sea at TREF, so the boundary would start the whole lagoon low.
+    """
+    return dict(
+        tref=event.tref.strftime("%Y%m%d %H%M%S"), tstart=event.tref.strftime("%Y%m%d %H%M%S"),
+        tstop=event.tstop.strftime("%Y%m%d %H%M%S"),
+        advection=1, alpha=0.5, huthresh=0.05, viscosity=1,
+        dtout=3600, dthisout=600, dtmaxout=99999999,
+        manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
+        zsini=event.zsini if event.zsini is not None else zs_boundary,
+    )
+
+
+def build(event: common.Event, run_dir: Path | None = None, subgrid: bool = True,
+          wind: str = "uniform", pressure: bool = False):
     from hydromt_sfincs import SfincsModel
 
-    inputs = common.INPUTS
+    run_dir = run_dir or common.RUNS / event.name
+    inputs, static = event.inputs_dir, common.INPUTS
     sf = SfincsModel(root=str(run_dir), mode="w+", data_libs=[str(common.ROOT / "data_catalog.yml")], write_gis=False)
     sf.setup_grid(x0=common.X0, y0=common.Y0, dx=common.DX, dy=common.DY, nmax=common.NMAX, mmax=common.MMAX,
                   rotation=0, epsg=common.CRS)
@@ -75,7 +124,7 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
     sf.setup_mask_active(mask="active_region", zmax=10.0, drop_area=0.5, fill_area=10.0, reset_mask=True)
     sf.setup_mask_bounds(btype="waterlevel", include_mask="boundary_ring", reset_bounds=True)
     if subgrid:
-        sf.setup_subgrid(datasets_dep=DATASETS_DEP, datasets_riv=DATASETS_RIV, nr_subgrid_pixels=20, nlevels=10,
+        sf.setup_subgrid(datasets_dep=DATASETS_DEP, datasets_riv=datasets_riv(inputs=static), nr_subgrid_pixels=20, nlevels=10,
                          manning_land=MANNING_LAND, manning_sea=MANNING_SEA, rgh_lev_land=RGH_LEV_LAND,
                          write_dep_tif=True)
         # NOTE: hydromt_sfincs 1.2.2's setup_subgrid() always writes the modern NetCDF
@@ -89,23 +138,16 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
         sf.setup_manning_roughness(manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
                                    rgh_lev_land=RGH_LEV_LAND)
 
-    sf.setup_config(
-        tref=common.TREF.strftime("%Y%m%d %H%M%S"), tstart=common.TREF.strftime("%Y%m%d %H%M%S"),
-        tstop=common.TSTOP.strftime("%Y%m%d %H%M%S"),
-        advection=1, alpha=0.5, huthresh=0.05, viscosity=1,
-        dtout=3600, dthisout=600, dtmaxout=99999999,
-        # Inert under a subgrid (see MANNING_LAND); written so sfincs.inp reports the
-        # same roughness the subgrid tables were built with instead of SFINCS' 0.04.
-        manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
-    )
     bzs = _read_ts(inputs / "bzs.csv")
-    sf.setup_config(zsini=float(bzs.iloc[0].mean()))
+    # config_for's zsini is the event's if it sets one, else the sea boundary's first
+    # value (see config_for's docstring for why that split exists).
+    sf.setup_config(**config_for(event, zs_boundary=float(bzs.iloc[0].mean())))
     sf.setup_waterlevel_forcing(timeseries=bzs,
-                                locations=gpd.read_file(inputs / "boundary_points.geojson").set_index("index", drop=False))
+                                locations=gpd.read_file(static / "boundary_points.geojson").set_index("index", drop=False))
     sf.setup_discharge_forcing(timeseries=_read_ts(inputs / "dis.csv"),
-                               locations=gpd.read_file(inputs / "dis_points.geojson").set_index("index", drop=False))
+                               locations=gpd.read_file(static / "dis_points.geojson").set_index("index", drop=False))
     if wind == "grid":
-        sf.setup_wind_forcing_from_grid(wind=str(inputs / "era5_grid_xaver.nc"))
+        sf.setup_wind_forcing_from_grid(wind=str(inputs / "era5_grid.nc"))
     else:
         sf.setup_wind_forcing(timeseries=str(inputs / "wind.csv"))
     if pressure:
@@ -115,8 +157,8 @@ def build(run_dir: Path = common.RUN_XAVER, subgrid: bool = True, wind: str = "u
         # ERA5 grid would double-count it. baro is already 1 in the written config
         # (also hydromt_sfincs' default), so SFINCS still applies the pressure
         # gradient force from netampfile inside the domain.
-        sf.setup_pressure_forcing_from_grid(press=str(inputs / "era5_grid_xaver.nc"))
-    sf.setup_observation_points(locations=gpd.read_file(inputs / "stations.geojson"))
+        sf.setup_pressure_forcing_from_grid(press=str(inputs / "era5_grid.nc"))
+    sf.setup_observation_points(locations=gpd.read_file(static / "stations.geojson"))
     sf.write()
     r = check_model(run_dir)
     print(r)
@@ -150,4 +192,5 @@ def check_model(run_dir: Path = common.RUN_XAVER) -> dict:
 
 if __name__ == "__main__":
     args = parse_args()
-    build(run_dir=common.RUNS / args.run_name, subgrid=not args.no_subgrid, wind=args.wind, pressure=args.pressure)
+    build(common.event(args.event), run_dir=common.RUNS / args.run_name, subgrid=not args.no_subgrid,
+          wind=args.wind, pressure=args.pressure)

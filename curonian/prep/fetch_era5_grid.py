@@ -8,6 +8,7 @@ can resolve spatial structure in the storm.
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import hydromt  # noqa: F401  -- registers the .raster accessor on xr.Dataset/DataArray
@@ -19,11 +20,10 @@ import xarray as xr
 import common
 
 DATASET = "reanalysis-era5-single-levels"
-REQUEST = {
+REQUEST_BASE = {
     "product_type": ["reanalysis"],
     "variable": ["10m_u_component_of_wind", "10m_v_component_of_wind", "mean_sea_level_pressure"],
     "year": ["2013"],
-    "month": ["11", "12"],
     "day": [f"{d:02d}" for d in range(1, 32)],
     "time": [f"{h:02d}:00" for h in range(24)],
     "area": [56.0, 20.25, 54.75, 22.0],   # N, W, S, E
@@ -34,25 +34,31 @@ REQUEST = {
 NIDA_LONLAT = (21.0, 55.25)   # ERA5 grid node used for the baseline uniform-wind point series
 
 
-def download(target: Path = common.INPUTS / "era5_raw_2013_11_12.nc") -> Path:
+def request(event: common.Event) -> dict:
+    return {**REQUEST_BASE, "month": list(event.gtsm_months)}
+
+
+def download(event: common.Event, target: Path | None = None) -> Path:
     import cdsapi
+    target = target or event.inputs_dir / "era5_raw.nc"
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.stat().st_size > 1_000_000:
         print(f"using cached {target}")
         return target
+    req = request(event)
     try:
-        cdsapi.Client().retrieve(DATASET, REQUEST, str(target))
+        cdsapi.Client().retrieve(DATASET, req, str(target))
     except Exception as exc:
-        print(f"CDS request failed for {DATASET} with form keys {sorted(REQUEST)}: {exc}")
+        print(f"CDS request failed for {DATASET} with form keys {sorted(req)}: {exc}")
         raise
     return target
 
 
-def to_hydromt(ds: xr.Dataset) -> xr.Dataset:
+def to_hydromt(ds: xr.Dataset, event: common.Event) -> xr.Dataset:
     """Reshape a raw CDS reanalysis-era5-single-levels download into the layout
     `setup_wind_forcing_from_grid`/`setup_pressure_forcing_from_grid` expect:
     variables wind10_u, wind10_v, press_msl on coords time, y (descending), x
-    (ascending), sliced to the model period with a 1 h pad on each side."""
+    (ascending), sliced to the event's period with a 1 h pad on each side."""
     rename = {}
     if "u10" in ds.variables:
         rename["u10"] = "wind10_u"
@@ -74,8 +80,8 @@ def to_hydromt(ds: xr.Dataset) -> xr.Dataset:
 
     ds = ds.sortby("y", ascending=False).sortby("x")
 
-    t0 = common.TREF - pd.Timedelta("1h")
-    t1 = common.TSTOP + pd.Timedelta("1h")
+    t0 = event.tref - pd.Timedelta("1h")
+    t1 = event.tstop + pd.Timedelta("1h")
     ds = ds.sel(time=slice(t0, t1))
     ds = ds.transpose("time", "y", "x")
 
@@ -131,17 +137,17 @@ def _peak_and_location(da: xr.DataArray) -> tuple[float, pd.Timestamp, float, fl
     return float(vals[idx]), time, y, x
 
 
-def main() -> xr.Dataset:
-    raw = download()
+def main(event: common.Event) -> xr.Dataset:
+    raw = download(event)
     with xr.open_dataset(raw) as raw_ds:
-        ds = to_hydromt(raw_ds.load())
+        ds = to_hydromt(raw_ds.load(), event)
 
     # Check the in-memory dataset before writing anything: if nida_check's assertion
-    # fails, no era5_grid_xaver.nc (or summary) should be left on disk to be picked up
+    # fails, no era5_grid.nc (or summary) should be left on disk to be picked up
     # by a later build.
     rmse = nida_check(ds)
 
-    out = common.INPUTS / "era5_grid_xaver.nc"
+    out = event.inputs_dir / "era5_grid.nc"
     ds.to_netcdf(out, encoding={"time": {"units": "hours since 1970-01-01"}})
 
     speed = np.hypot(ds["wind10_u"], ds["wind10_v"])
@@ -168,10 +174,16 @@ def main() -> xr.Dataset:
         f"mean sea level pressure: {mean_press:.0f} Pa\n"
         f"pressure minimum: {min_press:.0f} Pa at {min_press_time}\n"
     )
-    (common.INPUTS / "era5_grid_summary.txt").write_text(summary)
+    (event.inputs_dir / "era5_grid_summary.txt").write_text(summary)
     print(summary)
     return ds
 
 
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
+    return p.parse_args(argv)
+
+
 if __name__ == "__main__":
-    main()
+    main(common.event(parse_args().event))

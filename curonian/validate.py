@@ -1,4 +1,4 @@
-"""Score the Xaver run against the gauges and draw the delta flood extent."""
+"""Score a hindcast event's run against the gauges and draw the delta flood extent."""
 from __future__ import annotations
 
 import argparse
@@ -26,7 +26,6 @@ GAUGES = ("Klaipeda", "Nida", "Vente", "Uostadvaris")
 VALIDATION_WINDOW = (325_000, 6_105_000, 360_000, 6_145_000)
 
 STORM_WINDOW = (pd.Timestamp("2013-12-05 00:00"), pd.Timestamp("2013-12-09 00:00"))
-WHOLE_WINDOW = (common.TREF, common.TSTOP)
 
 
 def station_names(run_dir: Path) -> list[str]:
@@ -129,7 +128,7 @@ def _flood_arrays(run_dir: Path, window):
 
 
 def flood_map(run_dir: Path = common.RUN_XAVER, out_png: Path | None = None,
-              window=VALIDATION_WINDOW) -> float:
+              window=VALIDATION_WINDOW, event: common.Event = common.EVENTS["xaver_2013"]) -> float:
     ground, flooded, depth, gx, gy, cell_km2 = _flood_arrays(run_dir, window)
     area_km2 = float(flooded.sum() * cell_km2)
     if out_png:
@@ -137,7 +136,7 @@ def flood_map(run_dir: Path = common.RUN_XAVER, out_png: Path | None = None,
         ax.imshow(np.where(ground > 0, ground, np.nan), extent=[gx[0], gx[-1], gy[-1], gy[0]], cmap="Greys_r", vmin=-2, vmax=8)
         im = ax.imshow(np.where(flooded, depth, np.nan), extent=[gx[0], gx[-1], gy[-1], gy[0]], cmap="Blues", vmin=0, vmax=2)
         fig.colorbar(im, ax=ax, label="max flood depth on land [m]")
-        ax.set_title(f"Xaver 2013: flooded land in the delta window = {area_km2:.1f} km²")
+        ax.set_title(f"{event.title}: flooded land in the delta window = {area_km2:.1f} km²")
         fig.savefig(out_png, dpi=150); plt.close(fig)
     return area_km2
 
@@ -168,8 +167,8 @@ def c4_verdict(frac_pct: float, n_upland_px: int) -> str:
     return "met" if frac_pct < 1.0 else "not met"
 
 
-def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XAVER,
-             window=VALIDATION_WINDOW) -> list[dict]:
+def xaver_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XAVER,
+                    window=VALIDATION_WINDOW) -> list[dict]:
     """Spec section 9 success criteria, each as {name, window, value, threshold, verdict}."""
     out = []
 
@@ -246,6 +245,150 @@ def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XA
     return out
 
 
+# The crest window A3 averages the delta-to-sea head over. Wider than the peak
+# itself on purpose: the 24 Apr head is depressed by a one-day 20 cm excursion in
+# the Klaipeda gauge, which drags the head (Uostadvaris minus Klaipeda) down to
+# 52, 55, 39, 45, 47 cm on 22-26 Apr, so a single instant scores the sea's noise
+# rather than the river's head. See spec section 8.
+APRIL_CREST = (pd.Timestamp("2013-04-22"), pd.Timestamp("2013-04-26"))
+APRIL_FILL_LEVEL = 0.20      # m; the rising limb crosses it at 10-18 cm/day
+PLATEAU_TIE_M = 0.05         # daily gauge readings this close are the same crest
+# A4's no-skill bar. Fixed and reproducible rather than derived from the observed
+# sd, but only a real test of skill while that sd exceeds it -- today's Klaipeda
+# sd is ~0.089 m, clearing this by just 4 mm. See A4's block below for what
+# happens if that margin is ever lost.
+A4_RMSE_MAX = 0.085          # m
+
+
+def _first_crossing(s: pd.Series, level: float) -> pd.Timestamp:
+    above = s[s >= level]
+    if above.empty:
+        return pd.NaT
+    return above.index[0]
+
+
+def april_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path | None = None,
+                    window=VALIDATION_WINDOW) -> list[dict]:
+    """Spec section 8 criteria for the April 2013 freshet."""
+    out = []
+    lo, hi = common.event("april_2013").score_window
+    obs_u = obs_by_site["Uostadvaris"].loc[lo:hi]
+    obs_k = obs_by_site["Klaipeda"].loc[lo:hi]
+    mod_u = his["Uostadvaris"].loc[lo:hi]
+
+    # A1: peak magnitude, observed peak taken from the gauge rather than hardcoded.
+    s = skill(mod_u, obs_u)
+    out.append({"name": "A1 Uostadvaris peak", "window": _window_label((lo, hi)),
+                "value": f"model peak {mod_u.max():.2f} m vs gauge "
+                         f"{obs_u.max():.2f} m, err {s['peak_err_m']:+.2f} m",
+                "threshold": "peak err within +/-0.15 m",
+                "verdict": "met" if abs(s["peak_err_m"]) <= 0.15 else "not met"})
+
+    # A2a: filling rate. The daily record resolves this crossing only by
+    # interpolation across a limb rising 10-18 cm/day: the next daily READING at or
+    # above the level lags the true (interpolated) crossing by up to a day (19 Apr
+    # reads 0.19 m, 1 cm below the level, so the raw reading-based reference was
+    # 20 Apr 06:00 while the physically real crossing is ~19 Apr 08:00 -- 22 h
+    # earlier, enough to invert which models this criterion accepts). Interpolate
+    # the gauge onto an hourly grid before finding the crossing, so the reference
+    # is the crossing itself, not whichever daily reading happens to land after it.
+    obs_hourly = obs_u.reindex(pd.date_range(obs_u.index.min(), obs_u.index.max(), freq="h")).interpolate(method="time")
+    obs_cross = _first_crossing(obs_hourly, APRIL_FILL_LEVEL)
+    mod_cross = _first_crossing(mod_u, APRIL_FILL_LEVEL)
+    both_cross = pd.notna(mod_cross) and pd.notna(obs_cross)
+    dt_h = (mod_cross - obs_cross).total_seconds() / 3600 if both_cross else float("nan")
+    out.append({"name": "A2a filling rate", "window": f"first crossing of +{APRIL_FILL_LEVEL:.2f} m",
+                "value": (f"model {mod_cross:%Y-%m-%d %H:%M} vs gauge (interpolated) {obs_cross:%Y-%m-%d %H:%M}, "
+                          f"dt {dt_h:+.0f} h" if both_cross else "model or gauge never reached the level"),
+                "threshold": "within +/-24 h of the observed crossing",
+                "verdict": "met" if both_cross and abs(dt_h) <= 24 else "not met"})
+
+    # A2b: the crest, accepted anywhere in the observed plateau widened by 12 h.
+    # Uses skill()'s tie-aware peak_time (already computed for A1 above), not a
+    # plain idxmax: for a model whose own crest is a broad plateau -- exactly the
+    # shape this criterion exists to accommodate -- idxmax reports the plateau's
+    # leading edge and can push the verdict to "not met" where the plateau centre
+    # sits inside the band (see skill()'s own comment on the same aliasing).
+    plateau = obs_u[obs_u >= obs_u.max() - PLATEAU_TIE_M].index
+    p0, p1 = plateau.min() - pd.Timedelta("12h"), plateau.max() + pd.Timedelta("12h")
+    t_peak = s["peak_time"]
+    out.append({"name": "A2b crest timing", "window": f"{_fmt_dt(p0)} to {_fmt_dt(p1)}",
+                "value": f"model peak {t_peak:%Y-%m-%d %H:%M}; observed plateau "
+                         f"{plateau.min():%d %b}-{plateau.max():%d %b}",
+                "threshold": "model peak inside the observed plateau +/-12 h",
+                "verdict": "met" if p0 <= t_peak <= p1 else "not met"})
+
+    # A3: the head the river holds above the sea, averaged over the crest. Matched
+    # on the calendar date (not the exact timestamp) so the 26th's 06:00 reading is
+    # included along with 22-25's -- the window is a set of days, not a half-open
+    # instant range, and excluding the last day would silently narrow the average
+    # the comment above describes. An empty `stamps` (no gauge readings at all in
+    # the crest window) has nothing to measure -- c4_verdict's "n/a" ruling applies
+    # here too, not a "not met" that would misreport a data gap as a model failure.
+    stamps = [t for t in obs_u.index if APRIL_CREST[0] <= t.normalize() <= APRIL_CREST[1] and t in obs_k.index]
+    if stamps:
+        obs_head = float(np.mean([obs_u[t] - obs_k[t] for t in stamps]))
+        mod_head = float(np.mean([his["Uostadvaris"].loc[t] - his["Klaipeda"].loc[t] for t in stamps]))
+        value3 = (f"model {mod_head:.2f} m vs gauge {obs_head:.2f} m over {len(stamps)} readings, "
+                  f"err {mod_head - obs_head:+.2f} m")
+        verdict3 = "met" if abs(mod_head - obs_head) <= 0.15 else "not met"
+    else:
+        value3 = "no gauge readings in the crest window, nothing to measure"
+        verdict3 = "n/a"
+    out.append({"name": "A3 delta-to-sea head", "window": _window_label(APRIL_CREST),
+                "value": value3, "threshold": "mean head within +/-0.15 m", "verdict": verdict3})
+
+    # A4: the sea must beat the no-skill baseline (A4_RMSE_MAX, above), not merely
+    # sit near the mean. If sigma ever fell to or below that threshold, a flat,
+    # no-skill series would clear the RMSE bar too, and reporting "met" would
+    # claim a no-skill test that was no longer actually being performed. Report
+    # "n/a" instead of a false "met".
+    s4 = skill(his["Klaipeda"], obs_k)
+    sigma = float(obs_k.std(ddof=0))
+    if sigma <= A4_RMSE_MAX:
+        verdict4 = "n/a"
+        threshold4 = (f"RMSE <= {A4_RMSE_MAX:.3f} m -- not a real test here: the observed sd "
+                      f"({sigma:.3f} m) no longer exceeds this, so a flat series would pass too")
+    else:
+        verdict4 = "met" if s4["rmse"] <= A4_RMSE_MAX else "not met"
+        threshold4 = f"RMSE <= {A4_RMSE_MAX:.3f} m (below the observed sd of {sigma:.3f} m: a flat series fails)"
+    out.append({"name": "A4 Klaipeda control", "window": _window_label((lo, hi)),
+                "value": f"RMSE {s4['rmse']:.3f} m against an observed sd of {sigma:.3f} m",
+                "threshold": threshold4,
+                "verdict": verdict4})
+
+    # A5: Xaver's C4, same logic including the no-uplands value guard (see
+    # c4_verdict's docstring). Whole-run by construction -- dtmaxout gives one
+    # zsmax record spanning tstart..tstop, so this cannot be restricted to the
+    # scoring window.
+    ground, flooded, _, _, _, _ = _flood_arrays(run_dir, window)
+    uplands = np.isfinite(ground) & (ground > 3.0)
+    n_upland_px = int(uplands.sum())
+    frac_pct = (100.0 * float(flooded[uplands].sum()) / n_upland_px) if n_upland_px else float("nan")
+    out.append({"name": "A5 Silute uplands", "window": f"whole run, delta window {window}",
+                "value": (f"{frac_pct:.2f}% of land with ground > 3 m flooded" if n_upland_px
+                          else "no land above 3 m in this window, nothing to measure"),
+                "threshold": "< 1 % flooded",
+                "verdict": c4_verdict(frac_pct, n_upland_px)})
+    return out
+
+
+# Keyed by event name rather than held on the Event: a function reference on the
+# dataclass would make common.py depend on validate.py having been imported, and an
+# unset one would silently score April with Xaver's criteria instead of raising.
+CRITERIA = {"xaver_2013": xaver_criteria}
+CRITERIA["april_2013"] = april_criteria
+
+
+def criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.RUN_XAVER,
+             window=VALIDATION_WINDOW, event: common.Event | None = None) -> list[dict]:
+    """Dispatch on the event. Defaults to Xaver so the nine existing call sites --
+    and the existing verdicts -- are untouched. An unknown event raises KeyError
+    rather than falling back to the wrong criteria."""
+    return CRITERIA[event.name if event is not None else "xaver_2013"](
+        his, obs_by_site, run_dir, window)
+
+
 def _skill_table_lines(his: pd.DataFrame, obs_by_site: dict, window: tuple | None) -> list[str]:
     lines = ["| station | n | bias m | RMSE m | r | peak err m | peak dt h |", "|---|---|---|---|---|---|---|"]
     for g in GAUGES:
@@ -257,14 +400,16 @@ def _skill_table_lines(his: pd.DataFrame, obs_by_site: dict, window: tuple | Non
     return lines
 
 
-def main(run_dir: Path = common.RUN_XAVER) -> None:
+def main(event: common.Event, run_dir: Path | None = None) -> None:
+    run_dir = run_dir or common.RUNS / event.name
     his = load_his(run_dir)
-    obs_by_site = {g: load_gauge_levels(g) for g in GAUGES}
+    obs_by_site = {g: load_gauge_levels(g, event) for g in GAUGES}
 
-    lines = ["# Xaver 2013 validation", "", f"Whole period: {_window_label(WHOLE_WINDOW)}", ""]
+    lines = [f"# {event.title} validation", "", f"Whole period: {_window_label((event.tref, event.tstop))}", ""]
     lines += _skill_table_lines(his, obs_by_site, window=None)
-    lines += ["", f"Storm window: {_window_label(STORM_WINDOW)}", ""]
-    lines += _skill_table_lines(his, obs_by_site, window=STORM_WINDOW)
+    # event.score_label is what app/sfincs_data._PERIOD_RE looks for -- see Task 11.
+    lines += ["", f"{event.score_label}: {_window_label(event.score_window)}", ""]
+    lines += _skill_table_lines(his, obs_by_site, window=event.score_window)
 
     fig, axes = plt.subplots(len(GAUGES), 1, figsize=(10, 3 * len(GAUGES)), sharex=True)
     for ax, g in zip(axes, GAUGES):
@@ -273,10 +418,10 @@ def main(run_dir: Path = common.RUN_XAVER) -> None:
         ax.set_ylabel(f"{g} [m]"); ax.grid(alpha=0.3); ax.legend(loc="upper left")
     fig.autofmt_xdate(); fig.tight_layout(); fig.savefig(run_dir / "validation_timeseries.png", dpi=130); plt.close(fig)
 
-    area = flood_map(run_dir, run_dir / "flood_extent_delta.png")
+    area = flood_map(run_dir, run_dir / "flood_extent_delta.png", event=event)
     lines += ["", f"Flooded land in the delta window (depth > 5 cm, ground > 0 m): **{area:.1f} km²**"]
 
-    crit = criteria(his, obs_by_site, run_dir)
+    crit = criteria(his, obs_by_site, run_dir, event=event)
     lines += ["", "### Success criteria (spec section 9)"]
     for c in crit:
         lines.append(f"- {c['name']} [{c['window']}]: **{c['verdict']}** -- {c['value']} (threshold: {c['threshold']})")
@@ -292,10 +437,13 @@ def main(run_dir: Path = common.RUN_XAVER) -> None:
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--run", default="xaver_2013", help="runs/<name> to validate; results go to results/<name>")
-    return p.parse_args(argv)
+    p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
+    p.add_argument("--run", default=None, help="runs/<name> to validate; results go to results/<name>; defaults to the event name")
+    args = p.parse_args(argv)
+    args.run = args.run or args.event
+    return args
 
 
 if __name__ == "__main__":
     args = parse_args()
-    main(run_dir=common.RUNS / args.run)
+    main(common.event(args.event), run_dir=common.RUNS / args.run)
