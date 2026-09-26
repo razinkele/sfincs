@@ -27,3 +27,5 @@ Flooded land in the delta window (depth > 5 cm, ground > 0 m): **66.5 km²**
 - A3 delta-to-sea head [2013-04-22 00:00 to 2013-04-26 00:00]: **not met** -- model 0.71 m vs gauge 0.48 m over 5 readings, err +0.23 m (threshold: mean head within +/-0.15 m)
 - A4 Klaipeda control [2013-04-13 00:00 to 2013-05-02 00:00]: **not met** -- RMSE 0.176 m against an observed sd of 0.089 m (threshold: RMSE <= 0.085 m (below the observed sd of 0.089 m: a flat series fails))
 - A5 Silute uplands [whole run, delta window (325000, 6105000, 360000, 6145000)]: **met** -- 0.00% of land with ground > 3 m flooded (threshold: < 1 % flooded)
+- A6a Rusne rise [2013-04-13 00:00 to 2013-05-02 00:00]: **met** -- model 1.40 m vs gauge 1.53 m above the 05-11 Apr mean, err -0.12 m (daily values; gauge zero unknown, rise only) (threshold: rise within +/-0.15 m)
+- A6b Rusne crest date [19 Apr to 24 Apr]: **met** -- model crest 21 Apr; observed plateau 20 Apr-23 Apr (threshold: model crest inside the observed plateau +/-1 day)

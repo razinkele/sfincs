@@ -381,7 +381,7 @@ def _april_his(peak_day="2013-04-24", cross_day="2013-04-20", head=0.48, peak=0.
 def test_april_criteria_pass_on_a_faithful_model(synth_run_dir):
     obs = {g: mf.load_gauge_levels(g, APRIL) for g in va.GAUGES}
     crit = va.april_criteria(_april_his(), obs, synth_run_dir, SYNTH_WINDOW)
-    assert [c["name"][:3] for c in crit] == ["A1 ", "A2a", "A2b", "A3 ", "A4 ", "A5 "]
+    assert [c["name"][:3] for c in crit] == ["A1 ", "A2a", "A2b", "A3 ", "A4 ", "A5 ", "A6a", "A6b"]
     for p in ("A1", "A2a", "A2b", "A3"):
         assert _verdict(crit, p) == "met", p
     a2b = next(c for c in crit if c["name"].startswith("A2b"))
@@ -501,3 +501,58 @@ def test_a5_reports_na_on_a_window_without_uplands(lowland_run_dir):
     a5 = next(c for c in crit if c["name"].startswith("A5"))
     assert a5["verdict"] == "n/a"
     assert "no land above 3 m" in a5["value"]
+
+
+# ---------------------------------------------------------------------------
+# rusne_criteria() -- A6, the freshet's rise and crest at Rusne (relative only)
+# ---------------------------------------------------------------------------
+
+def _rusne_obs(rise=1.50, crest_day="2013-04-21"):
+    """Daily gauge series on an arbitrary zero (2 m, like the real one): flat
+    through the calm window, then a triangle to `rise` above it at `crest_day`."""
+    d = pd.date_range("2013-03-26", "2013-05-12", freq="D")
+    v = np.interp(d.asi8, pd.to_datetime(["2013-03-26", "2013-04-12", crest_day, "2013-05-12"]).asi8,
+                  [0.0, 0.0, rise, 0.6])
+    return pd.Series(2.0 + v, index=d, name="Rusne")
+
+
+def _rusne_his(rise=1.50, crest_day="2013-04-21"):
+    t = pd.date_range("2013-04-05", "2013-05-02", freq="h")
+    v = np.interp(t.asi8, pd.to_datetime(["2013-04-05", "2013-04-12", crest_day, "2013-05-02"]).asi8,
+                  [0.0, 0.0, rise, 0.7])
+    return pd.DataFrame({"Rusne": 0.05 + v}, index=t)
+
+
+def _a6(crit, prefix):
+    return next(c for c in crit if c["name"].startswith(prefix))
+
+
+def test_a6_met_on_a_faithful_model_despite_the_gauge_zero_offset():
+    crit = va.rusne_criteria(_rusne_his(), _rusne_obs(), APRIL)
+    assert _a6(crit, "A6a")["verdict"] == "met"
+    assert _a6(crit, "A6b")["verdict"] == "met"
+
+
+def test_a6a_not_met_when_the_rise_is_too_small():
+    crit = va.rusne_criteria(_rusne_his(rise=1.30), _rusne_obs(rise=1.50), APRIL)
+    a6a = _a6(crit, "A6a")
+    assert a6a["verdict"] == "not met"
+    assert "err -0.2" in a6a["value"], "the daily mean shaves ~3 cm off a sharp synthetic crest"
+
+
+def test_a6b_not_met_when_the_crest_is_late():
+    crit = va.rusne_criteria(_rusne_his(crest_day="2013-04-26"), _rusne_obs(), APRIL)
+    assert _a6(crit, "A6b")["verdict"] == "not met"
+
+
+def test_a6_na_without_a_gauge_record_or_model_station():
+    for his, obs in ((_rusne_his(), None),
+                     (_rusne_his(), pd.Series(dtype=float)),
+                     (_rusne_his().rename(columns={"Rusne": "X"}), _rusne_obs())):
+        assert [c["verdict"] for c in va.rusne_criteria(his, obs, APRIL)] == ["n/a", "n/a"]
+
+
+def test_rusne_file_loads_relative_to_its_own_gauge_zero():
+    s = mf.load_rusne_levels(APRIL)
+    assert len(s) == 48 and s.index[0] == pd.Timestamp("2013-03-26")
+    assert s.loc["2013-04-21"] == pytest.approx(3.44), "cm/100 only -- no model-datum shift"

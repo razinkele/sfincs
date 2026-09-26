@@ -15,7 +15,7 @@ import rasterio
 from rasterio.windows import from_bounds
 
 import common
-from prep.make_forcing import load_gauge_levels
+from prep.make_forcing import load_gauge_levels, load_rusne_levels
 
 GAUGES = ("Klaipeda", "Nida", "Vente", "Uostadvaris")
 
@@ -370,6 +370,54 @@ def april_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path | None = 
                           else "no land above 3 m in this window, nothing to measure"),
                 "threshold": "< 1 % flooded",
                 "verdict": c4_verdict(frac_pct, n_upland_px)})
+
+    out += rusne_criteria(his, obs_by_site.get("Rusne"), common.event("april_2013"))
+    return out
+
+
+def rusne_rise(daily: pd.Series, calm: tuple, score: tuple) -> float:
+    """The flood's rise at Rusne: the crest (max over the scoring window) minus
+    the calm-window mean. A calm-window baseline, not the pre-rise minimum:
+    it is the same reference the GTSM offset is fitted over, and a single-day
+    minimum would score one reading's noise. Differences only -- the gauge
+    zero is unknown, see make_forcing.load_rusne_levels."""
+    return float(daily.loc[score[0]:score[1]].max() - daily.loc[calm[0]:calm[1]].mean())
+
+
+def rusne_criteria(his: pd.DataFrame, obs: pd.Series | None, event: common.Event) -> list[dict]:
+    """A6: the freshet at Rusne, in the delta itself where Uostadvaris only sees
+    it after the Atmata. LHMT gives one value per day, so it is matched to the
+    model's daily mean. "n/a" (not "not met") when either side has no data --
+    a missing file or station is a data gap, not a model failure."""
+    calm = (event.calm_window[0], event.calm_window[1])
+    score = event.score_window
+    window = _window_label(score)
+    have = (obs is not None and "Rusne" in his
+            and not obs.loc[calm[0]:calm[1]].empty and not obs.loc[score[0]:score[1]].empty)
+    if not have:
+        why = "no Rusne gauge record or model station, nothing to measure"
+        return [{"name": "A6a Rusne rise", "window": window, "value": why,
+                 "threshold": "rise within +/-0.15 m", "verdict": "n/a"},
+                {"name": "A6b Rusne crest date", "window": window, "value": why,
+                 "threshold": "model crest inside the observed plateau +/-1 day", "verdict": "n/a"}]
+
+    mod = his["Rusne"].resample("D").mean()
+    obs_rise, mod_rise = rusne_rise(obs, calm, score), rusne_rise(mod, calm, score)
+    err = mod_rise - obs_rise
+    out = [{"name": "A6a Rusne rise", "window": window,
+            "value": (f"model {mod_rise:.2f} m vs gauge {obs_rise:.2f} m above the "
+                      f"{calm[0]:%d}-{calm[1]:%d %b} mean, err {err:+.2f} m (daily values; gauge zero unknown, rise only)"),
+            "threshold": "rise within +/-0.15 m",
+            "verdict": "met" if abs(err) <= 0.15 else "not met"}]
+
+    obs_s = obs.loc[score[0]:score[1]]
+    plateau = obs_s[obs_s >= obs_s.max() - PLATEAU_TIE_M].index
+    p0, p1 = plateau.min() - pd.Timedelta("1D"), plateau.max() + pd.Timedelta("1D")
+    t_peak = mod.loc[score[0]:score[1]].idxmax()
+    out.append({"name": "A6b Rusne crest date", "window": f"{p0:%d %b} to {p1:%d %b}",
+                "value": f"model crest {t_peak:%d %b}; observed plateau {plateau.min():%d %b}-{plateau.max():%d %b}",
+                "threshold": "model crest inside the observed plateau +/-1 day",
+                "verdict": "met" if p0 <= t_peak <= p1 else "not met"})
     return out
 
 
@@ -404,8 +452,11 @@ def main(event: common.Event, run_dir: Path | None = None) -> None:
     run_dir = run_dir or common.RUNS / event.name
     his = load_his(run_dir)
     obs_by_site = {g: load_gauge_levels(g, event) for g in GAUGES}
+    # Not in GAUGES: its gauge zero is unknown, so it has no place in the absolute
+    # skill table or plot -- only in the relative A6 criteria.
+    obs_by_site["Rusne"] = load_rusne_levels(event)
 
-    lines = [f"# {event.title} validation", "", f"Whole period: {_window_label((event.tref, event.tstop))}", ""]
+    lines =[f"# {event.title} validation", "", f"Whole period: {_window_label((event.tref, event.tstop))}", ""]
     lines += _skill_table_lines(his, obs_by_site, window=None)
     # event.score_label is what app/sfincs_data._PERIOD_RE looks for -- see Task 11.
     lines += ["", f"{event.score_label}: {_window_label(event.score_window)}", ""]
