@@ -30,6 +30,23 @@ def load_gauge_levels(site: str, event: common.Event) -> pd.Series:
     return s
 
 
+def load_rusne_levels(event: common.Event) -> pd.Series:
+    """Daily Atmata level at Rusne in metres above the station's OWN gauge zero.
+
+    Deliberately not passed through common.gauge_cm_to_m: Rusne's zero is not
+    500 cm below the model datum (it sits ~2 m off), so only differences within
+    this series mean anything. Indexed by date, not a reading hour -- LHMT's
+    historical endpoint gives one value per day. Empty if the event has no file.
+    """
+    src = event.inputs_dir / "lhmt_rusne.csv"
+    if not src.exists():
+        return pd.Series(dtype=float, name="Rusne")
+    df = pd.read_csv(src, comment="#", parse_dates=["observationDateUtc"])
+    df = df[df["waterLevel"].notna()]
+    s = pd.Series(df["waterLevel"].astype(float).values / 100.0, index=df["observationDateUtc"], name="Rusne")
+    return s.loc[event.data_window[0]:event.data_window[1]]
+
+
 def bias_correct(model: pd.Series, obs: pd.Series, window) -> tuple[pd.Series, float]:
     obs_w = obs.loc[window[0]:window[1]]
     model_at_obs = model.reindex(obs_w.index, method="nearest", tolerance=pd.Timedelta("1h"))

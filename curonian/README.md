@@ -373,6 +373,8 @@ Flooded land in the delta window (depth > 5 cm, ground > 0 m): **66.5 km²**
 - A3 delta-to-sea head [2013-04-22 00:00 to 2013-04-26 00:00]: **not met** -- model 0.71 m vs gauge 0.48 m over 5 readings, err +0.23 m (threshold: mean head within +/-0.15 m)
 - A4 Klaipeda control [2013-04-13 00:00 to 2013-05-02 00:00]: **not met** -- RMSE 0.176 m against an observed sd of 0.089 m (threshold: RMSE <= 0.085 m (below the observed sd of 0.089 m: a flat series fails))
 - A5 Silute uplands [whole run, delta window (325000, 6105000, 360000, 6145000)]: **met** -- 0.00% of land with ground > 3 m flooded (threshold: < 1 % flooded)
+- A6a Rusne rise [2013-04-13 00:00 to 2013-05-02 00:00]: **met** -- model 1.40 m vs gauge 1.53 m above the 05-11 Apr mean, err -0.12 m (daily values; gauge zero unknown, rise only) (threshold: rise within +/-0.15 m)
+- A6b Rusne crest date [19 Apr to 24 Apr]: **met** -- model crest 21 Apr; observed plateau 20 Apr-23 Apr (threshold: model crest inside the observed plateau +/-1 day)
 
 Forcing as run (`inputs/april_2013/forcing_summary.txt`): GTSM boundary offset
 −0.212 m (calm window 5–11 Apr 2013), boundary level −0.30 m at the start
@@ -385,8 +387,17 @@ readings, 19 h is inside the observation's own resolution).
 
 ### Findings
 
-- **Four of the six criteria are not met** — A2a and A2b on timing, A3 on the
-  delta-to-sea head, A4 on the sea boundary. A1 and A5 are met. The run itself is
+- **Four of the eight criteria are not met** — A2a and A2b on timing, A3 on the
+  delta-to-sea head, A4 on the sea boundary. A1, A5 and both Rusnė checks (A6a,
+  A6b) are met.
+- **A6 checks the freshet at Rusnė, in the delta itself**, against LHMT's daily
+  Atmata level (`inputs/april_2013/lhmt_rusne.csv`; © LHMT, CC BY-SA 4.0). That
+  gauge's zero is not known in the model datum (it sits ~2 m from the 500 cm
+  assumed for the lagoon gauges), so A6 scores only the rise above the 5–11 Apr
+  calm-window mean and the crest date, never absolute level. The model's rise is
+  1.40 m against 1.53 m observed (−0.12 m) and its crest falls on 21 Apr inside
+  the observed 20–23 Apr plateau. Its rising limb runs one to two days ahead of
+  the gauge, the same early filling that A2a flags at Uostadvaris. The run itself is
   not in question: `sfincs.inp`'s `tstart`/`tstop` match the event, `sfincs_his.nc`
   is finite throughout, and the solver log is clean.
 - **The model reproduces the freshet closely mid-lagoon, and fills the delta too
