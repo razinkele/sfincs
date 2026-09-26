@@ -125,10 +125,27 @@ def cmems_daily_boundary(event: common.Event,
 
 
 def discharge_forcing(event: common.Event) -> pd.DataFrame:
-    df = common.read_table(
-        "SELECT date, discharge_m3s FROM river_discharge WHERE river='Nemunas' AND gauge='Smalininkai' "
-        "AND date BETWEEN ? AND ? ORDER BY date", event.data_window)
-    daily = pd.Series(df["discharge_m3s"].values, index=pd.to_datetime(df["date"]))
+    """Nemunas discharge at Smalininkai, from LHMT's own published series.
+
+    Deliberately NOT from curonian_db.gpkg, which other projects share. That
+    database keeps an older extraction, `smalininkai 2013 01-06.xls`, as the
+    source for its own validated runs: `~/curonian/etl/20_load_lhmt_hydro.py`
+    states the policy and its reason -- LHMT and the xls differ by a few percent
+    on winter days (2013: 92 of 365 days by >2 %), so mixing them inside the
+    validated window would silently change every scored run there.
+
+    Re-ingesting the database to satisfy this model was tried on 2026-09-17 and
+    reverted: it broke that project's "Nemunas regenerates byte-identical"
+    property, which a 9 h 46 min run depends on. Reading LHMT here instead gives
+    this model the authority's current record while leaving theirs alone. The
+    divergence is asserted, not assumed -- see tests/test_forcing_provenance.py.
+    """
+    src = event.inputs_dir / "lhmt_smalininkai.csv"
+    df = pd.read_csv(src, comment="#", parse_dates=["observationDateUtc"])
+    df = df[df["waterDischarge"].notna()]
+    lo, hi = (pd.Timestamp(d) for d in event.data_window)
+    df = df[(df["observationDateUtc"] >= lo) & (df["observationDateUtc"] <= hi)]
+    daily = pd.Series(df["waterDischarge"].astype(float).values, index=df["observationDateUtc"])
     nem = lag_and_resample(daily, event.nemunas_lag_days, event.tref, event.tstop)
     if not nem.notna().all() or nem.index[0] != event.tref or nem.index[-1] != event.tstop:
         raise ValueError(f"Nemunas discharge does not cover {event.name} cleanly: "

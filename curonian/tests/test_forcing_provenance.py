@@ -17,8 +17,11 @@ import pytest
 import common
 
 FIXTURES = {
-    "xaver_2013": Path(__file__).parent / "data" / "lhmt_smalininkai_2013.csv",
-    "april_2013": Path(__file__).parent / "data" / "lhmt_smalininkai_2013_04.csv",
+    # Promoted out of tests/data on 2026-09-17: these are now the model's discharge
+    # INPUT, not merely a test fixture, because prep.make_forcing reads LHMT directly
+    # rather than the shared database. One copy, used by the pipeline and the tests.
+    "xaver_2013": common.INPUTS / "xaver_2013" / "lhmt_smalininkai.csv",
+    "april_2013": common.INPUTS / "april_2013" / "lhmt_smalininkai.csv",
 }
 PROV_EVENTS = [common.event("xaver_2013"), common.event("april_2013")]
 STATION = "smalininku-vms"
@@ -133,23 +136,27 @@ def test_minija_column_is_the_documented_constant(event):
 
 
 @pytest.mark.integration
-def test_db_smalininkai_agrees_with_lhmt_after_the_2026_09_17_reingest():
-    """The database's Smalininkai block must match LHMT's published series.
+def test_the_shared_database_deliberately_differs_from_this_model_s_discharge():
+    """This model reads LHMT; curonian_db.gpkg keeps an older extraction. On purpose.
 
-    Succeeds test_db_smalininkai_disagrees_with_lhmt_before_11_april_2013, which
-    pinned the gap while it existed. On 2026-09-17 source_id 167 (Jan-Jun 2013) was
-    re-ingested from api.meteo.lt: 124 of its 181 days had come from an older
-    extraction, `smalininkai 2013 01-06.xls`, and differed by up to 142 m3/s. The
-    block mean moved 701.7 -> 683.4 m3/s.
+    `~/curonian/etl/20_load_lhmt_hydro.py` sets the policy for that database and
+    gives the reason: the xls-derived Smalininkai record (1990-01-01..2014-04-30)
+    stays the source for ITS validated runs, because LHMT and the xls differ by a
+    few percent on winter days -- 2013: 92 of 365 days by >2 % -- so mixing them
+    inside the validated window would silently change every scored run there. Its
+    CHANGELOG additionally relies on "Nemunas regenerates byte-identical", a
+    property backed by a 9 h 46 min run.
 
-    This asserts the refresh holds. It fails if the block is restored from the .xls,
-    if LHMT revises again, or if a partial re-ingest leaves some days behind -- each
-    of which a human should see rather than have silently absorbed into the forcing.
+    Re-ingesting that block to suit this model was tried on 2026-09-17 and
+    reverted for exactly that reason (block 167 restored to the xls values on
+    2026-09-27). prep.make_forcing now reads
+    LHMT's series directly (inputs/<event>/lhmt_smalininkai.csv), so both projects
+    get the record they need from the same authority without fighting over one
+    file.
 
-    Scope note: only block 167 was refreshed. Blocks 166 (Nov-Dec 2012) and 169
-    (Jan-Apr 2014) still carry their original .xls values and still differ from the
-    API, so a step may exist at the block boundaries. Block 168 (Jul-Dec 2013), which
-    is where the Xaver event lives, already agreed exactly and was not touched.
+    This test pins the divergence so it stays deliberate. It fails if someone
+    re-ingests the database -- which is not forbidden, but must be a decision taken
+    with the sibling project rather than a side effect of working on this one.
     """
     event = common.event("april_2013")
     obs = lhmt(event)
@@ -158,15 +165,18 @@ def test_db_smalininkai_agrees_with_lhmt_after_the_2026_09_17_reingest():
         "AND date BETWEEN ? AND ?", event.data_window)
     db = pd.Series(df["discharge_m3s"].values, index=pd.to_datetime(df["date"]))
 
-    compared = 0
+    compared = differing = 0
     for day, q in db.items():
         if day not in obs.index:
             continue
-        assert q == pytest.approx(obs.loc[day], abs=0.5), (
-            f"{day:%Y-%m-%d}: db {q} vs LHMT {obs.loc[day]} -- the Jan-Jun 2013 re-ingest has "
-            "regressed, or LHMT has revised again; look before changing this tolerance")
         compared += 1
+        if abs(q - obs.loc[day]) > 0.5:
+            differing += 1
     assert compared >= 40, f"only {compared} days compared; expected the full April data window"
+    assert differing > 0, (
+        "the shared database now agrees with LHMT over April's window. Either it was re-ingested "
+        "-- check with ~/curonian before keeping that -- or LHMT revised its series to match. "
+        "Neither is a fault, but both need a human to look.")
 
 
 @pytest.mark.integration
