@@ -181,9 +181,9 @@ below.
   06:00/18:00 gauge cannot confirm or rule out — high-frequency energy
   carried in on the GTSM boundary.
 - Uostadvaris peak: model peak at 06:20 on 6 Dec against the gauge's 0.92 m at
-  06:00 — peak error +0.09 m at +0.3 h, inside the ±0.15 m / ±6 h target
+  06:00 — peak error +0.07 m at +0.3 h, inside the ±0.15 m / ±6 h target
   (C1: met). Sampled at the gauge's own coordinate since 2026-09-17; the
-  whole-period bias there is +0.01 m at RMSE 0.06 m, r 0.92.
+  whole-period bias there is −0.01 m at RMSE 0.06 m, r 0.91.
 - Nida delayed rise: the model rises from 0.39 m to 0.80 m across 7–8 December
   against the gauge's peak of 0.84 m, a miss of −0.04 m with the rise reproduced
   in sign — a clean C2 "met". Before the geometry fixes the same comparison read
@@ -194,22 +194,23 @@ below.
   ambiguity is gone. Nida, Juodkrante, Rusne and Silute all had to be moved
   0.2–1.2 km into wet cells to get a usable point series (see Run log).
 - The second rise is missed at both gauges, not just Nida: at 8 Dec 06:00
-  the model is −0.09 m low at Uostadvaris (0.74 m vs gauge 0.83 m) and
+  the model is −0.11 m low at Uostadvaris (0.72 m vs gauge 0.83 m) and
   −0.14 m low at Nida (0.60 m vs gauge 0.74 m) — almost the same miss at two
   gauges roughly 60 km apart. That similarity is evidence the miss is
   systematic rather than an artefact of moving the Nida station off its
   spec position, and at the time this was written it was read as pointing
   at missing spatial structure in the wind field. It does not: the gridded
   ERA5 wind sensitivity run (see "Sensitivity: gridded ERA5 wind and
-  pressure" below) reduced these two errors only from −0.09/−0.14 m to
-  −0.08/−0.11 m, so uniform wind does not explain this miss and the sea
+  pressure" below) reduced these two errors only from −0.11/−0.14 m to
+  −0.10/−0.11 m, so uniform wind does not explain this miss and the sea
   boundary (its timing and high-frequency content, discussed above) is the
   next target — see the reordered Assumptions to revisit below.
-- Vente: the table's peak error (+0.08 m at +2 h) is a window-max-to-
-  window-max comparison, 60 h apart. At matching 06:00 readings on 6 Dec the
-  model overshoots the setup peak by about 0.35 m (0.95 m modelled vs
-  0.60 m gauge) and tracks the gauge well afterwards; RMSE 0.12 m overall.
-- Flooded area: 157.3 km² of land floods in the delta window (depth > 5 cm,
+- Vente: the whole-period peak error (+0.08 m at +2 h) now compares the same
+  event — both maxima fall on the evening of 8 Dec (model 19:30, gauge 18:00).
+  At matching 06:00 readings on 6 Dec the model overshoots the setup peak by
+  about 0.21 m (0.81 m modelled vs 0.60 m gauge) and tracks the gauge well
+  afterwards; RMSE 0.10 m over the whole period, 0.12 m in the storm window.
+- Flooded area: 155.6 km² of land floods in the delta window (depth > 5 cm,
   ground > 0 m only). This is a lower bound on inundation extent — cells at
   or below 0 m ground are excluded — but likely an overestimate of real
   flooding, since the model has no drainage or pumping, the modelled
@@ -230,8 +231,8 @@ below.
   peak-timing mismatch, and the 8 Dec 06:00 miss (see above), but testing it
   directly (see "Sensitivity: gridded ERA5 wind and pressure") narrowed the
   Vente overshoot (+0.07 m → +0.04 m) and cut flooded area by about 17%
-  while leaving the 8 Dec 06:00 miss almost unchanged (−0.09/−0.14 m →
-  −0.08/−0.11 m), so a uniform vs. gridded wind field is not the main driver
+  while leaving the 8 Dec 06:00 miss almost unchanged (−0.11/−0.14 m →
+  −0.10/−0.11 m), so a uniform vs. gridded wind field is not the main driver
   of that particular miss; (3) the 500 cm gauge-zero assumption looks right
   as it stands — bias is within ±6 cm at all four gauges; (4) channel
   dimensions and the Minija constant discharge — this event gives no

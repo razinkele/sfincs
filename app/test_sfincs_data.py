@@ -82,7 +82,7 @@ def test_unscored_verdicts_leave_the_denominator(monkeypatch):
 
 
 def test_flooded_area_is_read_from_the_report():
-    assert sd.flooded_area_km2(VARIANT) == pytest.approx(157.3)
+    assert sd.flooded_area_km2(VARIANT) == pytest.approx(155.6)   # results/xaver_2013/validation.md since ad54760
 
 
 def test_both_metric_tables_are_parsed():
