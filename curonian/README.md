@@ -51,7 +51,9 @@ from:
 
 Tests: `micromamba run -n hydromt-sfincs python -m pytest tests -q`
 
-**Map tab.** The viewer's Map tab plays a run hour by hour on a WebGL map —
+**Map tab.** A read-only Shiny app in `app/` at the repo root (published at
+<https://laguna.ku.lt/sfincs/>, deployed with `sudo bash deploy/deploy.sh` — see
+`deploy/README.md`) views these runs. The viewer's Map tab plays a run hour by hour on a WebGL map —
 water level or change from start (relative to the starting water level nearby,
 so the starting shoreline shows no false step), plus the run's maximum —
 with the stations coloured by model − gauge wherever a gauge reading lies within
