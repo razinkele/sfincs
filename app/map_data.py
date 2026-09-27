@@ -71,6 +71,18 @@ def load_run(run: str) -> RunMaps:
     return _load_run(run, str(run_dir), tuple(_stat_key(p) for p in files))
 
 
+def safe_load(run: str) -> tuple[RunMaps | None, str | None]:
+    """(maps, None) on success; (None, None) when the run has no map file;
+    (None, reason) when the file is there but cannot be read -- the Map tab
+    shows the reason instead of the error closing the session."""
+    if not map_available(run):
+        return None, None
+    try:
+        return load_run(run), None
+    except (OSError, ValueError, KeyError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
 @lru_cache(maxsize=8)
 def _load_run(run: str, run_dir: str, _key: tuple) -> RunMaps:
     run_dir = Path(run_dir)
@@ -229,8 +241,11 @@ def _score_window(run: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
 
 def stations_at(run: str, when) -> list[dict]:
     """One record per station in the run's sfincs.obs, for the frame at `when`
-    (a Timestamp) or for the max view (`when == "max"`)."""
-    points = mc.read_points(sd.run_path(run, "sfincs.obs"))
+    (a Timestamp) or for the max view (`when == "max"`); none without one."""
+    obs_path = sd.run_path(run, "sfincs.obs")
+    if not obs_path.is_file():
+        return []
+    points = mc.read_points(obs_path)
     his = sd.station_levels(run)
     obs = gauge_obs(run)
     scored = set(obs["site"])
@@ -314,6 +329,8 @@ def overlays(run: str) -> dict:
         else:
             out[key] = []
             out["missing"].append(fname)
+    if not sd.run_path(run, "sfincs.obs").is_file():
+        out["missing"].append("sfincs.obs")
     inputs = Path(sd.DATA_DIR) / "inputs"
     for key, fname in (("outline", "active_region.geojson"), ("channels", "channels.geojson")):
         path = inputs / fname

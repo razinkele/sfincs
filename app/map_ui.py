@@ -141,9 +141,12 @@ def map_server(input, output, session, variant) -> None:
     resend = reactive.value(0)
 
     @reactive.calc
+    def loaded():
+        return md.safe_load(variant())      # (maps | None, load error | None)
+
+    @reactive.calc
     def run_maps():
-        v = variant()
-        return md.load_run(v) if md.map_available(v) else None
+        return loaded()[0]
 
     def _n_frames() -> int:
         rm = run_maps()
@@ -162,6 +165,7 @@ def map_server(input, output, session, variant) -> None:
         _set_playing(False)
         ui.update_slider("map_hour", min=0, max=max(_n_frames() - 1, 1), value=0)
         if rm is None:
+            await MAP.update(session, [])   # don't leave the previous run's map on screen
             return
         with reactive.isolate():
             q = input.map_quantity()
@@ -177,7 +181,7 @@ def map_server(input, output, session, variant) -> None:
     @reactive.event(input.map_play)
     def _play():
         if input.map_max():
-            return
+            ui.update_switch("map_max", value=False)    # Play leaves the max view and plays
         if pb.playing:
             pb.pause()
         else:
@@ -262,7 +266,9 @@ def map_server(input, output, session, variant) -> None:
                    style="display:flex;justify-content:space-between;"),
             ui.tags.small(" · ".join(lg["notes"]
                                      + ["stations: blue = model low, red = model high, clipped at "
-                                        f"±{md.ERROR_CLIP_M:.2f} m; grey = no gauge reading this hour; "
+                                        f"±{md.ERROR_CLIP_M:.2f} m; grey = no gauge reading "
+                                        + ("in the scoring window" if input.map_max() else "this hour")
+                                        + "; "
                                         "hollow = modelled only"]),
                           class_="text-muted"),
             class_="mt-2",
@@ -273,11 +279,14 @@ def map_server(input, output, session, variant) -> None:
         v = variant()
         if not md.map_available(v):
             return ui.markdown("_This run has no `sfincs_map.nc`; the map is unavailable._")
+        rm, err = loaded()
+        if rm is None:
+            return ui.markdown(f"_The map could not be loaded for this run ({(err or 'unknown error')[:200]}); "
+                               "the other tabs are unaffected._")
         notes = []
-        rm = run_maps()
         if not rm.cached:
             notes.append("No valid map cache for this run: run "
-                         f"`python -m prep.export_map_cache --run {v}` — clicks read the map file (~4 s).")
+                         f"`python -m prep.export_map_cache --run {v}` — clicks read the map file (a few seconds).")
         if md.gauge_obs(v).empty:
             notes.append("No `gauge_obs.csv` for this run: stations show modelled levels only.")
         missing = md.overlays(v)["missing"]
@@ -324,7 +333,7 @@ def map_server(input, output, session, variant) -> None:
         if status in ("initial", "cancelled"):
             return message(placeholder)
         if status == "running":
-            return message("Reading from the map file (~4 s)…" if rm is not None and not rm.cached
+            return message("Reading from the map file (a few seconds)…" if rm is not None and not rm.cached
                            else "Reading…")
         if status == "error":
             return message("Could not read this cell.")

@@ -70,8 +70,10 @@ report this.
 ## Dependencies
 
 None to install. The shared env `/opt/micromamba/envs/shiny` already provides
-shiny, pandas, xarray, netCDF4 and matplotlib. The viewer never opens
-`sfincs_map.nc`; station series come from the ~200 KB `sfincs_his.nc`.
+shiny, pandas, xarray, netCDF4, matplotlib, shiny_deckgl, scipy, pyproj and
+Pillow. Station series come from the ~200 KB `sfincs_his.nc`. The Map tab reads
+single frames of `sfincs_map.nc` (one hour at a time, or `zsmax` for the max view),
+plus the per-run cache that `prep.export_map_cache` writes next to it.
 
 ## Tests
 

@@ -786,6 +786,7 @@ Build and run, from this folder inside the `hydromt-sfincs` env:
     micromamba run -n hydromt-sfincs python build_model.py
     ../run_sfincs.sh runs/xaver_2013 16
     micromamba run -n hydromt-sfincs python validate.py
+    micromamba run -n hydromt-sfincs python -m prep.export_map_cache --run xaver_2013
 
 What `pytest tests` proves at each level:
 

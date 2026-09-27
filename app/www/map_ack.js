@@ -17,5 +17,6 @@
     });
   }
   if (window.Shiny && Shiny.addCustomMessageHandler) register();
-  else document.addEventListener("shiny:connected", register, { once: true });
+  // Shiny fires shiny:connected through jQuery, so a native listener never sees it.
+  else $(document).one("shiny:connected", register);
 })();

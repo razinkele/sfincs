@@ -153,8 +153,8 @@ if ! sudo -u shiny test -r "${SFINCS_DATA_DIR}/results" 2>/dev/null; then
     warn "  fix with:  chmod o+x $(dirname "$(dirname "$SFINCS_DATA_DIR")") ${SFINCS_DATA_DIR%/*} ${SFINCS_DATA_DIR}"
 fi
 
-"$SHINY_PYTHON" -c 'import shiny, pandas, xarray, matplotlib, netCDF4' \
-    || fail "shared shiny env is missing a dependency (shiny/pandas/xarray/matplotlib/netCDF4)"
+"$SHINY_PYTHON" -c 'import shiny, pandas, xarray, matplotlib, netCDF4, shiny_deckgl, scipy, pyproj, PIL' \
+    || fail "shared shiny env is missing a dependency (shiny/pandas/xarray/matplotlib/netCDF4/shiny_deckgl/scipy/pyproj/PIL)"
 info "dependencies present in shared env"
 
 # --- ship the code --------------------------------------------------------
@@ -165,7 +165,7 @@ mkdir -p "$APP_DIR"
 # it makes line numbers drift (see osmose-src/deploy.sh for the failure mode).
 rsync -a --delete \
     --exclude '__pycache__/' --exclude '*.pyc' --exclude '.pytest_cache/' \
-    --exclude 'test_*.py' \
+    --exclude 'test_*.py' --exclude 'e2e/' --exclude 'conftest.py' --exclude 'map_fixture.py' \
     "${SRC_DIR}/" "${APP_DIR}/"
 
 # Shiny Server starts the app without inheriting this shell's environment, so

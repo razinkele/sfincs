@@ -241,3 +241,26 @@ def test_real_april_frame_and_cached_series(monkeypatch):
         direct = np.ma.filled(d["zs"][:, row, col], np.nan).astype(float)
     np.testing.assert_allclose(cs.series.values, direct, atol=2e-3)
     assert not cs.slow
+
+
+def test_stations_without_sfincs_obs_is_empty_not_fatal(synthetic):
+    (sd.RUNS_DIR / synthetic / "sfincs.obs").unlink()
+    assert md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00")) == []
+    assert md.stations_at(synthetic, "max") == []
+    assert "sfincs.obs" in md.overlays(synthetic)["missing"]
+
+
+def test_safe_load_reports_an_unreadable_map_instead_of_raising(synthetic, monkeypatch):
+    rm, err = md.safe_load(synthetic)
+    assert rm is not None and err is None
+    for exc in (ValueError("bad header"), OSError("HDF error"), KeyError("zs")):
+        def boom(run, exc=exc):
+            raise exc
+        monkeypatch.setattr(md, "load_run", boom)
+        rm, err = md.safe_load(synthetic)
+        assert rm is None and err and type(exc).__name__ in err
+
+
+def test_safe_load_without_a_map_file_is_none_without_error(synthetic):
+    (sd.RUNS_DIR / synthetic / "sfincs_map.nc").unlink()
+    assert md.safe_load(synthetic) == (None, None)
