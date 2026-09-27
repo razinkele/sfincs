@@ -24,11 +24,13 @@ All commands run from this folder inside the `hydromt-sfincs` env:
     micromamba run -n hydromt-sfincs python build_model.py
     ../run_sfincs.sh runs/xaver_2013 16
     micromamba run -n hydromt-sfincs python validate.py
+    micromamba run -n hydromt-sfincs python -m prep.export_map_cache --run xaver_2013
 
     micromamba run -n hydromt-sfincs python -m prep.make_forcing --event april_2013
     micromamba run -n hydromt-sfincs python build_model.py --event april_2013
     ../run_sfincs.sh runs/april_2013 16
     micromamba run -n hydromt-sfincs python validate.py --event april_2013
+    micromamba run -n hydromt-sfincs python -m prep.export_map_cache --run april_2013
 
 Two channel inputs are derived from a *built* model rather than from raw data, so
 they bootstrap — build once, derive, rebuild. `prep.derive_strait` reads the active
@@ -48,6 +50,17 @@ from:
     micromamba run -n hydromt-sfincs python -m diag.mass_balance april_2013
 
 Tests: `micromamba run -n hydromt-sfincs python -m pytest tests -q`
+
+**Map tab.** The viewer's Map tab plays a run hour by hour on a WebGL map —
+water level or change from start (relative to the starting water level nearby,
+so the starting shoreline shows no false step), plus the run's maximum —
+with the stations coloured by model − gauge wherever a gauge reading lies within
+30 min of the frame, the sea boundary, river inflows, active area and channel
+centrelines drawn on top, and a click on any cell plotting its series. It needs
+`prep.export_map_cache --run <name>` after each run: that writes the cell-series
+cache (~430 MB per April run, ~210 MB per Xaver run, git-ignored under `runs/`)
+and `results/<name>/gauge_obs.csv` (committed). Without it the tab still plays,
+but a click reads `sfincs_map.nc` directly (~4 s).
 
 ## Run log
 

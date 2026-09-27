@@ -2,7 +2,9 @@
 import base64
 import io
 import os
+from pathlib import Path
 
+import netCDF4 as nc
 import numpy as np
 import pandas as pd
 import pytest
@@ -219,3 +221,23 @@ def test_legend_titles_and_max_note(synthetic):
     assert lg["title"].startswith("Change from start")
     assert lg["vmin"] == -lg["vmax"] and len(lg["colors"]) == 9
     assert any("clipped" in n for n in lg["notes"])
+
+
+REAL = Path("/home/razinka/sfincs/curonian/runs/april_2013")
+
+
+@pytest.mark.skipif(not mc.cache_valid(REAL), reason="april_2013 map cache not exported on this machine")
+def test_real_april_frame_and_cached_series(monkeypatch):
+    monkeypatch.setattr(sd, "RUNS_DIR", REAL.parent)
+    rm = md.load_run("april_2013")
+    img = _decode(md.frame_image(rm, 300, "level"))
+    assert img.shape[:2] == rm.warp.index.shape
+    assert 1000 <= img.shape[1] <= 1080 and 1100 <= img.shape[0] <= 1180    # ~1040 x 1138 at 176 m
+    assert (img[..., 3] == 0).any() and (img[..., 3] == 255).any()
+    row, col = 550, 500
+    lon, lat = mc.to_lonlat(rm.grid.x0 + col * rm.grid.dx, rm.grid.y0 + row * rm.grid.dy)
+    cs = md.cell_series(rm, float(lon), float(lat))
+    with nc.Dataset(REAL / "sfincs_map.nc") as d:
+        direct = np.ma.filled(d["zs"][:, row, col], np.nan).astype(float)
+    np.testing.assert_allclose(cs.series.values, direct, atol=2e-3)
+    assert not cs.slow
