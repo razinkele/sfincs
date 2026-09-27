@@ -19,6 +19,11 @@ import matplotlib.pyplot as plt
 from shiny import App, reactive, render, ui
 
 import sfincs_data as sd
+from pathlib import Path
+
+from shiny_deckgl import head_includes
+
+import map_ui
 
 # --------------------------------------------------------------------------
 # Verdict presentation
@@ -87,6 +92,7 @@ app_ui = ui.page_sidebar(
         ui.tags.small(ABOUT),
         width=330,
     ),
+    head_includes(),
     ui.navset_card_tab(
         ui.nav_panel(
             "Overview",
@@ -99,6 +105,7 @@ app_ui = ui.page_sidebar(
             "Figures",
             ui.output_ui("figure_gallery"),
         ),
+        map_ui.map_panel(),
         ui.nav_panel(
             "Station levels",
             ui.row(
@@ -137,6 +144,8 @@ def server(input, output, session):
     @reactive.calc
     def variant() -> str:
         return input.variant()
+
+    map_ui.map_server(input, output, session, variant)
 
     @reactive.calc
     def levels():
@@ -331,4 +340,7 @@ def server(input, output, session):
         )
 
 
-app = App(app_ui, server, static_assets={"/figures": sd.RESULTS_DIR})
+app = App(app_ui, server, static_assets={
+    "/figures": sd.RESULTS_DIR,
+    "/www": Path(__file__).parent / "www",
+})
