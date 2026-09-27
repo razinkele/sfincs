@@ -210,14 +210,35 @@ GREY = [160, 160, 160, 230]
 DARK = [40, 40, 40, 255]
 CLEAR = [0, 0, 0, 0]
 _GEOJSON_TO_LONLAT = Transformer.from_crs(3346, 4326, always_xy=True)
-EMPTY_FC = {"type": "FeatureCollection", "features": []}
 
 
 def gauge_obs(run: str) -> pd.DataFrame:
     path = sd.results_path(run, "gauge_obs.csv")
     if not path.is_file():
         return pd.DataFrame(columns=["site", "time", "level_m"])
-    return _gauge_obs(_stat_key(path))
+    try:
+        return _gauge_obs(_stat_key(path))
+    except READ_ERRORS:
+        return pd.DataFrame(columns=["site", "time", "level_m"])
+
+
+def his_unreadable(run: str) -> bool:
+    """True when sfincs_his.nc exists but could not be read (station_levels
+    then returns an empty frame, so the stations show no modelled levels)."""
+    return sd.run_path(run, "sfincs_his.nc").is_file() and sd.station_levels(run).empty
+
+
+def gauge_obs_unreadable(run: str) -> bool:
+    """True when gauge_obs.csv exists but could not be parsed (gauge_obs then
+    returns an empty frame, so the stations show modelled levels only)."""
+    path = sd.results_path(run, "gauge_obs.csv")
+    if not path.is_file():
+        return False
+    try:
+        _gauge_obs(_stat_key(path))
+        return False
+    except READ_ERRORS:
+        return True
 
 
 @lru_cache(maxsize=16)
@@ -226,7 +247,12 @@ def _gauge_obs(key: tuple) -> pd.DataFrame:
     # this filesystem mtime_ns has coarse enough resolution that two writes a
     # few tests apart can land on the same tick, which would otherwise serve
     # a stale cached frame.
-    return pd.read_csv(key[0], parse_dates=["time"]).sort_values(["site", "time"], kind="stable")
+    frame = pd.read_csv(key[0], usecols=["site", "time", "level_m"])
+    # Strict conversions: a bad timestamp or level raises ValueError here
+    # (-> READ_ERRORS) instead of surviving as text and failing later.
+    frame["time"] = pd.to_datetime(frame["time"], format="%Y-%m-%d %H:%M:%S")
+    frame["level_m"] = pd.to_numeric(frame["level_m"])
+    return frame.sort_values(["site", "time"], kind="stable")
 
 
 def _model_at(series: pd.Series, t: pd.Timestamp) -> float:
@@ -252,7 +278,10 @@ def stations_at(run: str, when) -> list[dict]:
     obs_path = sd.run_path(run, "sfincs.obs")
     if not obs_path.is_file():
         return []
-    points = mc.read_points(obs_path)
+    try:
+        points = mc.read_points(obs_path)
+    except READ_ERRORS:
+        return []                     # overlays() reports it as unreadable
     his = sd.station_levels(run)
     obs = gauge_obs(run)
     scored = set(obs["site"])
@@ -270,7 +299,7 @@ def stations_at(run: str, when) -> list[dict]:
                     else "model: n/a")
         else:
             level = _model_at(model, when)
-            text = f"model {level:.2f} m"
+            text = f"model {level:.2f} m" if np.isfinite(level) else "model: n/a"
         if name in scored:
             readings = obs.loc[obs["site"] == name].set_index("time")["level_m"]
             if when == "max":
@@ -326,26 +355,39 @@ def overlays(run: str) -> dict:
     """Stations/boundary/inflows from the run's own files; the active-area
     outline and channel centrelines from the shared inputs/ (labelled
     "current inputs" in the UI, since a run directory has no copy)."""
-    out: dict = {"missing": []}
+    out: dict = {"missing": [], "unreadable": []}
     for key, fname in (("boundary", "sfincs.bnd"), ("inflows", "sfincs.src")):
         path = sd.run_path(run, fname)
-        if path.is_file():
-            pts = mc.read_points(path)
-            lon, lat = mc.to_lonlat([p[0] for p in pts], [p[1] for p in pts])
-            out[key] = [{"position": [float(a), float(b)]} for a, b in zip(np.atleast_1d(lon), np.atleast_1d(lat))]
-        else:
-            out[key] = []
+        out[key] = []
+        if not path.is_file():
             out["missing"].append(fname)
-    if not sd.run_path(run, "sfincs.obs").is_file():
+            continue
+        try:
+            pts = mc.read_points(path)
+        except READ_ERRORS:
+            out["unreadable"].append(fname)
+            continue
+        lon, lat = mc.to_lonlat([p[0] for p in pts], [p[1] for p in pts])
+        out[key] = [{"position": [float(a), float(b)]} for a, b in zip(np.atleast_1d(lon), np.atleast_1d(lat))]
+    obs = sd.run_path(run, "sfincs.obs")
+    if not obs.is_file():
         out["missing"].append("sfincs.obs")
+    else:
+        try:
+            mc.read_points(obs)
+        except READ_ERRORS:
+            out["unreadable"].append("sfincs.obs")
     inputs = Path(sd.DATA_DIR) / "inputs"
     for key, fname in (("outline", "active_region.geojson"), ("channels", "channels.geojson")):
         path = inputs / fname
-        if path.is_file():
-            out[key] = _geojson_lonlat(path)
-        else:
-            out[key] = dict(EMPTY_FC)
+        out[key] = {"type": "FeatureCollection", "features": []}
+        if not path.is_file():
             out["missing"].append(fname)
+            continue
+        try:
+            out[key] = _geojson_lonlat(path)
+        except READ_ERRORS:
+            out["unreadable"].append(fname)
     return out
 
 

@@ -290,3 +290,44 @@ def test_safe_load_without_a_map_file_is_none_without_error(synthetic):
 
 def test_read_errors_cover_what_netcdf_raises_for_a_missing_variable():
     assert IndexError in md.READ_ERRORS
+
+
+# ---- corrupt (not missing) run files degrade, never raise --------------------
+
+@pytest.mark.parametrize("fname, key", [("sfincs.bnd", "boundary"), ("sfincs.src", "inflows")])
+def test_a_corrupt_point_file_is_reported_not_fatal(synthetic, fname, key):
+    (sd.RUNS_DIR / synthetic / fname).write_text("330050.0 not-a-number\n")
+    ov = md.overlays(synthetic)
+    assert ov[key] == [] and fname in ov["unreadable"]
+
+
+def test_a_corrupt_obs_file_means_no_stations(synthetic):
+    (sd.RUNS_DIR / synthetic / "sfincs.obs").write_text('x y "Klaipeda"\n')
+    assert md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00")) == []
+    assert "sfincs.obs" in md.overlays(synthetic)["unreadable"]
+
+
+def test_a_corrupt_geojson_is_reported_not_fatal(synthetic):
+    (sd.DATA_DIR / "inputs" / "channels.geojson").write_text("{not json")
+    ov = md.overlays(synthetic)
+    assert ov["channels"]["features"] == [] and "channels.geojson" in ov["unreadable"]
+
+
+@pytest.mark.parametrize("content", ["not,a,gauge,file\n1,2,3,4\n",
+                                     "site,time,level_m\nKlaipeda,yesterday-ish,0.1\n",
+                                     "site,time,level_m\nKlaipeda,2013-04-05 02:00:00,high\n"])
+def test_a_corrupt_gauge_csv_means_modelled_only(synthetic, content):
+    path = sd.results_path(synthetic, "gauge_obs.csv")
+    path.write_text(content)
+    assert md.gauge_obs(synthetic).empty
+    assert md.gauge_obs_unreadable(synthetic)
+    kinds = {r["kind"] for r in md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00"))}
+    assert kinds == {"modelled"}
+
+
+def test_a_corrupt_his_file_means_no_model_levels(synthetic):
+    (sd.RUNS_DIR / synthetic / "sfincs_his.nc").write_bytes(b"\x89HDF garbage" * 10)
+    assert sd.station_levels(synthetic).empty
+    assert md.his_unreadable(synthetic)
+    records = md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00"))
+    assert len(records) == 3 and all("n/a" in r["text"] for r in records)

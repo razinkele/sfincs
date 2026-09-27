@@ -266,7 +266,9 @@ def station_levels(variant: str) -> pd.DataFrame:
         return pd.DataFrame()
     try:
         return _station_frame(variant, path.stat().st_mtime)
-    except (OSError, KeyError, ValueError):
+    # IndexError: what netCDF4 raises for a variable missing from a file
+    # that otherwise opens (same set as map_data.READ_ERRORS).
+    except (OSError, KeyError, ValueError, IndexError):
         return pd.DataFrame()
 
 

@@ -314,11 +314,17 @@ def map_server(input, output, session, variant) -> None:
         if not rm.cached:
             notes.append("No valid map cache for this run: run "
                          f"`python -m prep.export_map_cache --run {v}` — clicks read the map file (a few seconds).")
-        if md.gauge_obs(v).empty:
+        if md.gauge_obs_unreadable(v):
+            notes.append("`gauge_obs.csv` could not be read: stations show modelled levels only.")
+        elif md.gauge_obs(v).empty:
             notes.append("No `gauge_obs.csv` for this run: stations show modelled levels only.")
-        missing = md.overlays(v)["missing"]
-        if missing:
-            notes.append("Missing overlay files: " + ", ".join(missing) + ".")
+        if md.his_unreadable(v):
+            notes.append("`sfincs_his.nc` could not be read: stations show no modelled levels.")
+        ov = md.overlays(v)
+        if ov["missing"]:
+            notes.append("Missing overlay files: " + ", ".join(ov["missing"]) + ".")
+        if ov["unreadable"]:
+            notes.append("Unreadable overlay files (skipped): " + ", ".join(ov["unreadable"]) + ".")
         return ui.tags.small(ui.markdown("  \n".join(notes)), class_="text-warning") if notes else None
 
     @reactive.extended_task
