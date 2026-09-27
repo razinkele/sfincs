@@ -1,0 +1,6 @@
+grid: 651 time steps x 6 y x 8 x, resolution 0.25 x 0.25 deg
+period: 2013-04-04 23:00:00 to 2013-05-02 01:00:00
+Nida-point wind speed RMSE: 0.000 m/s
+peak wind speed: 12.7 m/s at 2013-04-25 01:00:00 (55.50N, 20.50E)
+mean sea level pressure: 101664 Pa
+pressure minimum: 99866 Pa at 2013-04-12 18:00:00

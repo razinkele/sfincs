@@ -40,6 +40,8 @@ VARIANT_LABELS = {
     "xaver_2013_gridwind": "Xaver 2013 — ERA5 gridded wind",
     "xaver_2013_gridwind_pressure": "Xaver 2013 — ERA5 wind + pressure",
     "april_2013": "April 2013 — Nemunas freshet",
+    "april_2013_gridwind": "April 2013 — ERA5 gridded wind",
+    "april_2013_gridwind_pressure": "April 2013 — ERA5 wind + pressure",
 }
 
 
