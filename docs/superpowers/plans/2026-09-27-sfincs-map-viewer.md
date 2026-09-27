@@ -23,14 +23,17 @@
 - Every cache file is written to a temporary name in the same directory and `os.replace`d; `map_meta.json` is written last and is what makes a cache valid (its recorded `sfincs_map.nc` size and `mtime_ns` must match the file).
 - Playback step 0.25 s; stop at the last frame (no loop); Play at the last frame restarts from hour 0.
 - The frame image LRU holds 512 entries.
+- Every netCDF open/read in the viewer (`map_core`, `map_data`, `sfincs_data._station_frame`) holds `map_core.NC_LOCK`: netcdf-c is not thread-safe and the click read runs in a worker thread. The uncached click read takes the lock per block of `map_data.SLOW_BLOCK = 4` frames.
 - Never run `prep.make_channels` (live Overpass data). Never modify `~/curonian/curonian_db.gpkg`.
 - Every commit message ends with these two lines:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
   `Claude-Session: https://claude.ai/code/session_01KRu4KRMkzuo3KBx1pDy9mh`
 
-**Two deliberate refinements of the spec, applied throughout this plan:**
+**Four deliberate refinements of the spec, applied throughout this plan:**
 1. *Frame dropping.* The spec's literal rule ("a tick is skipped while the last sent frame is unacknowledged") would make the shown hour fall behind wall-clock time on a slow link — the lag it exists to prevent. Here the hour **always advances on schedule**, and a frame is **sent** only when the previous one has been acknowledged; the latest hour is sent as soon as the ack arrives. Frames are dropped, time is not.
 2. *Acceptance timing.* "Median step ≤ 250 ms" is measured as the interval between consecutive acknowledgements in the browser, which includes the 250 ms timer, so the bound is **median ≤ 300 ms, no interval > 1000 ms** over 100 steps. The station-hover check is covered by unit tests of the tooltip text plus a manual Playwright screenshot, because deck.gl picking is not reachable from a page script.
+3. *Slow-link simulation.* Chromium's network throttling does not slow WebSocket messages, and all Shiny traffic is WebSocket, so the acceptance test simulates a slow link by delaying each frame acknowledgement 800 ms through a test hook (`window.__mapAckDelay` in `map_ack.js`) instead of throttling to 1 Mbit/s.
+4. *Fallback load inline.* Loading a run without a valid cache (baseline, warp, three-frame ranges) measured 0.5–0.9 s on April and runs inline in a `reactive.calc`; the spec is amended accordingly (commit alongside this plan fix).
 
 ## Review Focus
 
@@ -76,7 +79,7 @@
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `map_core.PIXEL_M: float = 176.0`, `map_core.CACHE_FILES: tuple[str, ...]`
+  - `map_core.PIXEL_M: float = 176.0`, `map_core.CACHE_FILES: tuple[str, ...]`, `map_core.NC_LOCK: threading.Lock` (held by every netCDF read in the viewer)
   - `@dataclass(frozen=True, eq=False) class Grid: x0: float; y0: float; dx: float; dy: float; active: np.ndarray (bool n×m); zb: np.ndarray (float n×m, NaN where none); times: np.ndarray (datetime64[s]); shape -> tuple[int, int]` (property)
   - `read_grid(map_nc: Path) -> Grid`
   - `read_frame(map_nc: Path, hour: int) -> np.ndarray` (float64 n×m, NaN = dry/inactive)
@@ -332,8 +335,11 @@ def test_warp_maps_each_pixel_to_its_nearest_cell_north_up(synthetic):
             assert abs(my - (fx.Y0 + row * fx.D)) <= fx.D / 2 + 1e-6
             checked += 1
     assert checked > 100
-    rows_top = [int(k) // fx.M for k in w.index[0] if k >= 0]
-    rows_bottom = [int(k) // fx.M for k in w.index[-1] if k >= 0]
+    # ceil() pads the raster by up to one pixel at the north and east edges, so
+    # compare the first and last image rows that actually hold an active cell.
+    covered = [i for i in range(height) if (w.index[i] >= 0).any()]
+    rows_top = [int(k) // fx.M for k in w.index[covered[0]] if k >= 0]
+    rows_bottom = [int(k) // fx.M for k in w.index[covered[-1]] if k >= 0]
     assert min(rows_top) > max(rows_bottom), "image row 0 must be the northern edge"
 
 
@@ -343,6 +349,19 @@ def test_warp_marks_inactive_cells_minus_one(synthetic):
     flat = set(int(k) for k in w.index.ravel() if k >= 0)
     assert 1 * fx.M + 27 not in flat          # inactive corner cell
     assert 10 * fx.M + 12 in flat
+
+
+def test_map_reads_wait_for_the_netcdf_lock(synthetic):
+    """netcdf-c is not thread-safe: a click reads in a worker thread while the
+    event loop reads frames, so every read must hold map_core.NC_LOCK."""
+    import threading
+    done = threading.Event()
+    with mc.NC_LOCK:
+        t = threading.Thread(target=lambda: (mc.read_frame(_map_nc(synthetic), 0), done.set()))
+        t.start()
+        assert not done.wait(0.3), "read_frame ran while another thread held NC_LOCK"
+    t.join(5)
+    assert done.is_set()
 ```
 
 - [ ] **Step 4: Run the tests to verify they fail**
@@ -366,6 +385,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -380,6 +400,10 @@ PIXEL_M = 176.0        # web-map pixel in EPSG:3857 metres: ~100 m on the ground
 HIST_LO, HIST_HI, HIST_BIN = -2.0, 10.0, 0.001
 MIN_RANGE_M = 0.01
 CACHE_FILES = ("zs_series.npy", "map_baseline.npy", "map_warp.npz", "map_meta.json")
+# netcdf-c is not thread-safe ("expect segfaults if a netcdf file is opened on
+# multiple threads"): the app reads frames on the event loop and clicked cells in
+# a worker thread, so every netCDF open/read in the viewer holds this lock.
+NC_LOCK = threading.Lock()
 
 _TO_WEB = Transformer.from_crs(MODEL_CRS, 3857, always_xy=True)
 _FROM_WEB = Transformer.from_crs(3857, MODEL_CRS, always_xy=True)
@@ -408,7 +432,7 @@ class Grid:
 
 
 def read_grid(map_nc: Path) -> Grid:
-    with nc.Dataset(map_nc) as d:
+    with NC_LOCK, nc.Dataset(map_nc) as d:
         x, y = _nan(d["x"][:]), _nan(d["y"][:])
         msk = np.ma.filled(d["msk"][:], 0)
         zb = _nan(d["zb"][:])
@@ -424,12 +448,12 @@ def read_grid(map_nc: Path) -> Grid:
 
 
 def read_frame(map_nc: Path, hour: int) -> np.ndarray:
-    with nc.Dataset(map_nc) as d:
+    with NC_LOCK, nc.Dataset(map_nc) as d:
         return _nan(d["zs"][int(hour)])
 
 
 def read_zsmax(map_nc: Path) -> np.ndarray:
-    with nc.Dataset(map_nc) as d:
+    with NC_LOCK, nc.Dataset(map_nc) as d:
         z = d["zsmax"][:]
     return _nan(z[0] if z.ndim == 3 else z)
 
@@ -497,7 +521,7 @@ def compute_warp(grid: Grid, pixel_m: float = PIXEL_M) -> Warp:
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cd /home/razinka/sfincs && micromamba run -n shiny python -m pytest app/test_map_core.py -q`
-Expected: 6 passed. Also run `micromamba run -n shiny python -m pytest app/ -q` — the existing 17 app tests still pass.
+Expected: 7 passed. Also run `micromamba run -n shiny python -m pytest app/ -q` — the existing 17 app tests still pass.
 
 - [ ] **Step 7: Commit**
 
@@ -569,8 +593,8 @@ def test_colour_ranges_are_centred_and_never_zero_width():
     flat = mc.RangeHistogram()
     flat.add(np.full(100, 0.5))
     r = mc.colour_ranges(flat, flat)
-    assert r["level"][1] - r["level"][0] >= mc.MIN_RANGE_M
-    assert r["change"][0] == -r["change"][1] and r["change"][1] >= mc.MIN_RANGE_M / 2
+    assert r["level"][1] - r["level"][0] >= mc.MIN_RANGE_M - 1e-9      # ends rounded to 4 dp
+    assert r["change"][0] == -r["change"][1] and r["change"][1] >= mc.MIN_RANGE_M / 2 - 1e-9
 
 
 def test_atomic_save_leaves_nothing_on_failure(tmp_path):
@@ -616,7 +640,7 @@ def test_cache_goes_stale_when_the_map_file_changes_or_meta_is_missing(synthetic
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd /home/razinka/sfincs && micromamba run -n shiny python -m pytest app/test_map_core.py -q`
-Expected: the 7 new tests FAIL with `AttributeError: module 'map_core' has no attribute ...`; the 6 Task 1 tests pass.
+Expected: the 7 new tests FAIL with `AttributeError: module 'map_core' has no attribute ...`; the 7 Task 1 tests pass.
 
 - [ ] **Step 3: Implement**
 
@@ -716,7 +740,7 @@ def export_cache(run_dir: Path) -> dict:
     baseline = compute_baseline(read_frame(map_nc, 0), grid.active)
     by_time = np.empty((nt, active_flat.size), np.float16)
     level_hist, change_hist = RangeHistogram(), RangeHistogram()
-    with nc.Dataset(map_nc) as d:
+    with NC_LOCK, nc.Dataset(map_nc) as d:
         for t in range(nt):
             zs = _nan(d["zs"][t])
             by_time[t] = zs.ravel()[active_flat]
@@ -744,7 +768,7 @@ def export_cache(run_dir: Path) -> dict:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd /home/razinka/sfincs && micromamba run -n shiny python -m pytest app/test_map_core.py -q`
-Expected: 13 passed.
+Expected: 14 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -939,7 +963,7 @@ git commit -m "Map tab: export CLI with explicit run-to-event resolution and gau
 **Interfaces:**
 - Consumes: `map_core` (Tasks 1–2); `sfincs_data.RUNS_DIR`, `run_path`.
 - Produces:
-  - `QUANTITIES = ("level", "change")`
+  - `QUANTITIES = ("level", "change")`, `SLOW_BLOCK = 4`
   - `@dataclass(frozen=True, eq=False) class RunMaps: run: str; map_nc: Path; grid: mc.Grid; warp: mc.Warp; baseline: np.ndarray; ranges: dict[str, tuple[float, float]]; labels: list[str]; times: pd.DatetimeIndex; series: np.ndarray | None; active_flat: np.ndarray; cached: bool`
   - `map_available(run: str) -> bool`
   - `load_run(run: str) -> RunMaps`
@@ -1051,6 +1075,29 @@ def test_locate_rejects_outside_and_inactive(synthetic):
     lon, lat = mc.to_lonlat(fx.X0 - 0.4 * fx.D, fx.Y0 + 5 * fx.D)
     assert md.locate(rm, float(lon), float(lat)) == (5, 0)    # still inside cell (5, 0)
     assert md.cell_series(rm, *_lonlat(1, 27)) is None
+
+
+def test_slow_read_releases_the_lock_between_blocks(synthetic, monkeypatch):
+    import threading
+
+    class Counting:
+        def __init__(self):
+            self.n, self._lock = 0, threading.Lock()
+
+        def __enter__(self):
+            self.n += 1
+            self._lock.acquire()
+
+        def __exit__(self, *exc):
+            self._lock.release()
+
+    rm = md.load_run(synthetic)                  # no cache: the slow path
+    md.frame(rm, "max", "level")                 # warm zsmax so only the column read counts
+    counting = Counting()
+    monkeypatch.setattr(mc, "NC_LOCK", counting)
+    monkeypatch.setattr(md, "SLOW_BLOCK", 2)
+    cs = md.cell_series(rm, *_lonlat(10, 12))
+    assert cs.slow and counting.n == 3           # 6 frames in blocks of 2
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1078,6 +1125,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -1092,6 +1140,10 @@ import map_core as mc
 import sfincs_data as sd
 
 QUANTITIES = ("level", "change")
+# The uncached click read goes through sfincs_map.nc a few frames at a time,
+# releasing NC_LOCK between blocks, so a playing session's frame reads wait at
+# most one block (~0.1 s) instead of the whole ~4 s column read.
+SLOW_BLOCK = 4
 CMAPS = {"level": "viridis", "change": "RdBu_r"}
 IMAGE_LRU = 512
 
@@ -1159,8 +1211,13 @@ def _load_run(run: str, run_dir: str, _key: tuple) -> RunMaps:
                    active_flat=active_flat, cached=cached)
 
 
+@lru_cache(maxsize=8)
+def _zsmax(rm: RunMaps) -> np.ndarray:
+    return mc.read_zsmax(rm.map_nc)
+
+
 def frame(rm: RunMaps, when, quantity: str) -> np.ndarray:
-    zs = mc.read_zsmax(rm.map_nc) if when == "max" else mc.read_frame(rm.map_nc, int(when))
+    zs = _zsmax(rm) if when == "max" else mc.read_frame(rm.map_nc, int(when))
     return zs if quantity == "level" else zs - rm.baseline
 
 
@@ -1224,12 +1281,16 @@ def cell_series(rm: RunMaps, lon: float, lat: float) -> CellSeries | None:
         k = int(np.searchsorted(rm.active_flat, row * m + col))
         values, slow = np.asarray(rm.series[k], dtype=np.float64), False
     else:
-        with nc.Dataset(rm.map_nc) as d:
-            values = np.ma.filled(d["zs"][:, row, col], np.nan).astype(np.float64)
+        nt = len(rm.times)
+        values = np.empty(nt, dtype=np.float64)
+        for t0 in range(0, nt, SLOW_BLOCK):
+            with mc.NC_LOCK, nc.Dataset(rm.map_nc) as d:
+                values[t0:t0 + SLOW_BLOCK] = np.ma.filled(d["zs"][t0:t0 + SLOW_BLOCK, row, col], np.nan)
+            time.sleep(0.005)          # let a waiting frame read take the lock
         slow = True
     g = rm.grid
     return CellSeries(row=row, col=col, x=g.x0 + col * g.dx, y=g.y0 + row * g.dy,
-                      zb=float(g.zb[row, col]), zsmax=float(mc.read_zsmax(rm.map_nc)[row, col]),
+                      zb=float(g.zb[row, col]), zsmax=float(_zsmax(rm)[row, col]),
                       series=pd.Series(values, index=rm.times, name="zs"), slow=slow)
 ```
 
@@ -1248,10 +1309,24 @@ files (reports, ``sfincs_his.nc``); the Map tab reads single frames of
 ``sfincs_map.nc`` through ``map_data.py``.
 ```
 
+and in `_station_frame` (same file) take the shared netCDF lock, because the Map tab reads netCDF from a worker thread while this runs on the event loop — change
+
+```python
+    with xr.open_dataset(run_path(variant, "sfincs_his.nc")) as ds:
+```
+
+to
+
+```python
+    from map_core import NC_LOCK     # netcdf-c is not thread-safe; see map_core.NC_LOCK
+
+    with NC_LOCK, xr.open_dataset(run_path(variant, "sfincs_his.nc")) as ds:
+```
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd /home/razinka/sfincs && micromamba run -n shiny python -m pytest app/test_map_data.py -q`
-Expected: 8 passed. Then `micromamba run -n shiny python -m pytest app/ -q` → all pass.
+Expected: 9 passed. Then `micromamba run -n shiny python -m pytest app/ -q` → all pass.
 
 - [ ] **Step 5: Measure the fallback load on the real April run**
 
@@ -1262,7 +1337,7 @@ import time, map_data as md
 t=time.time(); rm=md.load_run('april_2013'); print('load', round(time.time()-t,2), 's cached=', rm.cached)
 t=time.time(); md.frame_image(rm, 300, 'level'); print('frame', round(time.time()-t,3), 's')"
 ```
-(run with `app/` on the path: prefix `cd app &&` if the import fails.) Expected: `cached=False` (no export yet), load ≲ 2 s, frame ≲ 0.2 s. If load exceeds 2 s, note it in the task report — the spec allows the fallback inline only because it is short.
+(run with `app/` on the path: prefix `cd app &&` if the import fails.) Expected: `cached=False` (no export yet), load ≲ 2 s, frame ≲ 0.2 s. If load exceeds 2 s, note it in the task report — the spec runs this fallback inline because it measured 0.5–0.9 s; a longer one needs moving into a background task.
 
 - [ ] **Step 6: Commit**
 
@@ -1557,7 +1632,7 @@ def legend(rm: RunMaps, quantity: str, is_max: bool) -> dict:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd /home/razinka/sfincs && micromamba run -n shiny python -m pytest app/test_map_data.py -q`
-Expected: 17 passed.
+Expected: 18 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -1663,8 +1738,10 @@ def test_layers_build_for_the_synthetic_run(synthetic):
 
 def test_panel_builds():
     from shiny import ui
-    html = str(ui.navset_tab(mu.map_panel()))       # a nav_panel only renders inside a navset
-    for element in ("map_play", "map_hour", "map_quantity", "map_cell_plot", "www/map_ack.js"):
+    # a nav_panel only renders inside a navset, and a NavSet has no HTML __str__
+    html = str(ui.TagList(ui.navset_tab(mu.map_panel())))
+    for element in ("map_play", "map_hour", "map_quantity", "map_cell_plot", "map_cell_caption",
+                    "www/map_ack.js"):
         assert element in html
 
 
@@ -1693,11 +1770,16 @@ Create `app/www/map_ack.js`:
 // this browser. window.__mapAcks keeps arrival times for the acceptance test.
 (function () {
   window.__mapAcks = [];
+  // Test hook: the acceptance test sets this (ms) to stand in for a slow link,
+  // because Chromium's network throttling does not slow WebSocket messages.
+  window.__mapAckDelay = 0;
   function register() {
     Shiny.addCustomMessageHandler("map_frame_seq", function (msg) {
       window.__mapAcks.push({ run: msg.run, seq: msg.seq, t: performance.now() });
       if (window.__mapAcks.length > 5000) window.__mapAcks.shift();
-      Shiny.setInputValue("map_frame_ack", msg, { priority: "event" });
+      setTimeout(function () {
+        Shiny.setInputValue("map_frame_ack", msg, { priority: "event" });
+      }, window.__mapAckDelay || 0);
     });
   }
   if (window.Shiny && Shiny.addCustomMessageHandler) register();
@@ -1832,6 +1914,7 @@ def map_panel():
         ui.output_ui("map_legend"),
         ui.output_ui("map_status"),
         ui.output_plot("map_cell_plot", height="300px"),
+        ui.output_text("map_cell_caption"),
         ui.tags.script(src="www/map_ack.js"),
     )
 
@@ -1999,6 +2082,17 @@ def map_server(input, output, session, variant) -> None:
             return
         _series_task(rm, float(c["longitude"]), float(c["latitude"]))
 
+    @render.text
+    def map_cell_caption():
+        """Names the plotted cell once a series is drawn; empty for messages
+        (lets the acceptance test tell a real plot from the placeholder)."""
+        if _series_task.status() != "success":
+            return ""
+        cs = _series_task.result()
+        if cs is None or cs.series.isna().all():
+            return ""
+        return f"cell row {cs.row}, col {cs.col}"
+
     @render.plot
     def map_cell_plot():
         fig, ax = plt.subplots(figsize=(10, 3))
@@ -2067,7 +2161,7 @@ app = App(app_ui, server, static_assets={
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cd /home/razinka/sfincs && micromamba run -n shiny python -m pytest app/ -q`
-Expected: all pass (17 existing + 13 + 17 + 8 new = 55; the per-variant layer test runs for the six real runs, which have `sfincs_map.nc`).
+Expected: all pass (17 existing + 14 map_core + 18 map_data + 13 map_ui = 62; the per-variant layer test runs for the six real runs, which have `sfincs_map.nc`).
 
 - [ ] **Step 7: Run the app and look at it**
 
@@ -2276,19 +2370,18 @@ def test_playback_pace_on_april(page: Page, app_url: str):
 
 def test_slow_link_drops_frames_not_time(page: Page, app_url: str):
     _open_map(page, app_url, "april_2013")
-    cdp = page.context.new_cdp_session(page)
-    cdp.send("Network.emulateNetworkConditions", {
-        "offline": False, "latency": 50,
-        "downloadThroughput": 125_000, "uploadThroughput": 125_000})   # 1 Mbit/s
+    # Chromium's Network.emulateNetworkConditions does not throttle WebSocket
+    # throughput, so a slow link is simulated by delaying each acknowledgement.
+    page.evaluate("window.__mapAckDelay = 800")
     start_acks = len(_acks(page))
     page.click("#map_play")
     page.wait_for_timeout(10_000)
     page.click("#map_play")
-    page.wait_for_timeout(2_000)      # let the throttled link deliver the last slider update
+    page.wait_for_timeout(2_000)      # let the last delayed acks and slider update land
     shown = int(page.locator("#map_hour").input_value())
     sent = len(_acks(page)) - start_acks
     assert shown >= 32, f"hour {shown} after 10 s: time fell behind"        # 0.8 x 40 ticks
-    assert sent < shown, "every frame was delivered: no dropping happened at 1 Mbit/s"
+    assert sent < shown, "every frame was delivered: no dropping happened with 800 ms acks"
 
 
 def test_switching_run_mid_playback_resets_cleanly(page: Page, app_url: str):
@@ -2306,9 +2399,10 @@ def test_switching_run_mid_playback_resets_cleanly(page: Page, app_url: str):
 
 def test_click_on_water_draws_a_series(page: Page, app_url: str):
     _open_map(page, app_url, "april_2013")
+    expect(page.locator("#map_cell_caption")).to_have_text("")        # placeholder plot, no series
     box = page.locator("#map canvas").first.bounding_box()
     page.mouse.click(box["x"] + box["width"] * 0.45, box["y"] + box["height"] * 0.55)
-    expect(page.locator("#map_cell_plot img")).to_be_visible(timeout=15_000)
+    expect(page.locator("#map_cell_caption")).to_contain_text("cell row", timeout=15_000)
 ```
 
 - [ ] **Step 3: Run the acceptance tests**

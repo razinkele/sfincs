@@ -183,6 +183,13 @@ nearby".
   `inputs/channels.geojson` (the run directory has no copy), labelled in the UI
   as "current inputs". All reprojected to EPSG:4326.
 
+**netCDF and threads** — netcdf-c is not thread-safe, and the click read runs
+in a worker thread while the event loop reads frames, so every netCDF open and
+read in the viewer (including `sfincs_data`'s `sfincs_his.nc` read) holds one
+process-wide lock, `map_core.NC_LOCK`. The uncached click read takes it per
+4-frame block, so a playing session's frame read waits ~0.1 s at most. (Found
+by the plan review, which reproduced a segfault without the lock.)
+
 **`app/map_ui.py`** — the Map tab's UI function and server function, so
 `app.py` only adds a `nav_panel` and one call. Keeps the playback logic out of
 the 330-line `app.py`.
@@ -249,7 +256,7 @@ blocked, with "reading from the map file (~4 s)" shown meanwhile.
 | state | behaviour |
 |---|---|
 | no `sfincs_map.nc` | Map tab shows a message; other tabs unaffected |
-| cache invalid (meta missing or stale) | the Map tab says "run the export for this run" and still plays: hour labels from `sfincs_map.nc`, baseline and warp computed on first use (seconds, off the event loop), colour ranges from the first, middle and last frames only, and cell clicks take the slow path |
+| cache invalid (meta missing or stale) | the Map tab says "run the export for this run" and still plays: hour labels from `sfincs_map.nc`, baseline and warp computed on first use, inline (0.5–0.9 s measured on April, once per run per process), colour ranges from the first, middle and last frames only, and cell clicks take the slow path |
 | no `gauge_obs.csv` | station markers show modelled levels only, all hollow |
 | an overlay file missing | that overlay omitted with a note; the map still renders |
 
