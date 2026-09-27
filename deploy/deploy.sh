@@ -262,7 +262,12 @@ if [[ "$CODE" != "200" ]]; then
     fail "deployment incomplete — catalogue entry left hidden"
 fi
 
-curl -sk "$PUBLIC_URL" | grep -qi "SFINCS" \
+# Fetch first, then match: under `set -o pipefail`, `curl | grep -q` fails
+# whenever grep exits on its first match before curl has written the whole
+# page (curl dies of SIGPIPE) -- which the page does once it outgrows the pipe
+# buffer, as it did when the Map tab added the deck.gl assets.
+PAGE="$(curl -sk "$PUBLIC_URL" || true)"
+grep -qi "SFINCS" <<<"$PAGE" \
     || fail "page served but does not look like the SFINCS app"
 info "HTTP 200 and page content verified"
 
