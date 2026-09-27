@@ -4,6 +4,7 @@ import io
 import os
 
 import numpy as np
+import pandas as pd
 import pytest
 from PIL import Image
 
@@ -117,3 +118,92 @@ def test_slow_read_releases_the_lock_between_blocks(synthetic, monkeypatch):
     monkeypatch.setattr(md, "SLOW_BLOCK", 2)
     cs = md.cell_series(rm, *_lonlat(10, 12))
     assert cs.slow and counting.n == 3           # 6 frames in blocks of 2
+
+
+def _write_obs(run, rows):
+    fx.write_gauge_obs(sd.results_path(run, "gauge_obs.csv"), rows)
+
+
+def _by_name(records):
+    return {r["name"]: r for r in records}
+
+
+def test_gauge_error_only_within_thirty_minutes_of_a_reading(synthetic):
+    _write_obs(synthetic, [("Klaipeda", "2013-04-05 01:40:00", -0.16)])
+    at2 = _by_name(md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00")))
+    k = at2["Klaipeda"]
+    assert k["kind"] == "gauge"
+    # model at the READING's time (01:40 -> -0.1333) minus the reading
+    assert k["error"] == pytest.approx(fx.level(100 / 60) - (-0.16), abs=1e-3)
+    assert "01:40" in k["text"] and "+0.03" in k["text"]
+    at4 = _by_name(md.stations_at(synthetic, pd.Timestamp("2013-04-05 04:00")))
+    assert at4["Klaipeda"]["kind"] == "no_reading" and at4["Klaipeda"]["error"] is None
+    assert "no reading this hour" in at4["Klaipeda"]["text"]
+
+
+def test_thirty_minute_bound_is_inclusive_and_ties_take_the_earlier_reading(synthetic):
+    _write_obs(synthetic, [("Klaipeda", "2013-04-05 01:30:00", -0.20),
+                           ("Klaipeda", "2013-04-05 02:30:00", -0.05)])
+    k = _by_name(md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00")))["Klaipeda"]
+    assert k["kind"] == "gauge" and "01:30" in k["text"]
+
+
+def test_modelled_only_stations_are_hollow_and_rusne_is_flagged(synthetic):
+    _write_obs(synthetic, [("Klaipeda", "2013-04-05 02:00:00", -0.10)])
+    at = _by_name(md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00")))
+    assert at["Rusne"]["kind"] == "modelled" and "gauge zero unknown" in at["Rusne"]["text"]
+    assert at["Silute"]["kind"] == "modelled" and at["Silute"]["fill"][3] == 0
+    assert at["Klaipeda"]["fill"][3] == 255
+
+
+def test_error_colour_is_signed_and_clipped(synthetic):
+    _write_obs(synthetic, [("Klaipeda", "2013-04-05 02:00:00", -1.0)])   # model 0.9 m too high
+    k = _by_name(md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00")))["Klaipeda"]
+    red = k["fill"]
+    _write_obs(synthetic, [("Klaipeda", "2013-04-05 02:00:00", 1.0)])    # model far too low
+    blue = _by_name(md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00")))["Klaipeda"]["fill"]
+    assert red[0] > red[2] and blue[2] > blue[0]
+    _write_obs(synthetic, [("Klaipeda", "2013-04-05 02:00:00", -0.35)])  # +0.25, past the clip
+    clipped = _by_name(md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00")))["Klaipeda"]["fill"]
+    assert clipped == red
+
+
+def test_max_view_compares_maxima_in_the_scoring_window(synthetic):
+    _write_obs(synthetic, [("Klaipeda", "2013-04-05 01:40:00", -0.16),
+                           ("Klaipeda", "2013-04-05 03:00:00", -0.02)])
+    k = _by_name(md.stations_at(synthetic, "max"))["Klaipeda"]
+    assert k["kind"] == "gauge"
+    assert k["error"] == pytest.approx(fx.level(5) - (-0.02), abs=1e-3)
+    assert "05:00" in k["text"] and "03:00" in k["text"]
+
+
+def test_no_gauge_csv_means_every_station_is_modelled_only(synthetic):
+    kinds = {r["kind"] for r in md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00"))}
+    assert kinds == {"modelled"}
+
+
+def test_overlays_come_from_the_run_and_inputs_in_lonlat(synthetic):
+    ov = md.overlays(synthetic)
+    assert ov["missing"] == []
+    assert len(ov["boundary"]) == 2 and len(ov["inflows"]) == 1
+    lon, lat = ov["inflows"][0]["position"]
+    assert 20.0 < lon < 23.0 and 54.0 < lat < 57.0
+    ring = ov["outline"]["features"][0]["geometry"]["coordinates"][0]
+    assert all(20.0 < p[0] < 23.0 and 54.0 < p[1] < 57.0 for p in ring)
+    assert "crs" not in ov["outline"]
+
+
+def test_a_missing_overlay_is_reported_not_fatal(synthetic):
+    (sd.DATA_DIR / "inputs" / "channels.geojson").unlink()
+    (sd.RUNS_DIR / synthetic / "sfincs.src").unlink()
+    ov = md.overlays(synthetic)
+    assert set(ov["missing"]) == {"channels.geojson", "sfincs.src"}
+    assert ov["channels"]["features"] == [] and ov["inflows"] == []
+
+
+def test_legend_titles_and_max_note(synthetic):
+    rm = md.load_run(synthetic)
+    lg = md.legend(rm, "change", is_max=True)
+    assert lg["title"].startswith("Change from start")
+    assert lg["vmin"] == -lg["vmax"] and len(lg["colors"]) == 9
+    assert any("clipped" in n for n in lg["notes"])

@@ -22,7 +22,9 @@ import netCDF4 as nc
 import numpy as np
 import pandas as pd
 from matplotlib import colormaps
+from matplotlib.colors import to_hex
 from PIL import Image
+from pyproj import Transformer
 
 import map_core as mc
 import sfincs_data as sd
@@ -180,3 +182,159 @@ def cell_series(rm: RunMaps, lon: float, lat: float) -> CellSeries | None:
     return CellSeries(row=row, col=col, x=g.x0 + col * g.dx, y=g.y0 + row * g.dy,
                       zb=float(g.zb[row, col]), zsmax=float(_zsmax(rm)[row, col]),
                       series=pd.Series(values, index=rm.times, name="zs"), slow=slow)
+
+
+PAIR_TOLERANCE = pd.Timedelta("30min")
+ERROR_CLIP_M = 0.20
+RELATIVE_ONLY = {"Rusne": "gauge zero unknown"}
+GREY = [160, 160, 160, 230]
+DARK = [40, 40, 40, 255]
+CLEAR = [0, 0, 0, 0]
+_GEOJSON_TO_LONLAT = Transformer.from_crs(3346, 4326, always_xy=True)
+EMPTY_FC = {"type": "FeatureCollection", "features": []}
+
+
+def gauge_obs(run: str) -> pd.DataFrame:
+    path = sd.results_path(run, "gauge_obs.csv")
+    if not path.is_file():
+        return pd.DataFrame(columns=["site", "time", "level_m"])
+    return _gauge_obs(_stat_key(path))
+
+
+@lru_cache(maxsize=16)
+def _gauge_obs(key: tuple) -> pd.DataFrame:
+    # Keyed on the full file stat (Task 4's _stat_key), not mtime alone: on
+    # this filesystem mtime_ns has coarse enough resolution that two writes a
+    # few tests apart can land on the same tick, which would otherwise serve
+    # a stale cached frame.
+    return pd.read_csv(key[0], parse_dates=["time"]).sort_values(["site", "time"], kind="stable")
+
+
+def _model_at(series: pd.Series, t: pd.Timestamp) -> float:
+    s = series.dropna()
+    return float(np.interp(pd.Timestamp(t).value, s.index.asi8, s.values)) if len(s) else float("nan")
+
+
+def error_colour(err: float) -> list[int]:
+    x = (np.clip(err, -ERROR_CLIP_M, ERROR_CLIP_M) + ERROR_CLIP_M) / (2 * ERROR_CLIP_M)
+    r, g, b, _ = colormaps["RdBu_r"](x)
+    return [int(r * 255), int(g * 255), int(b * 255), 255]
+
+
+def _score_window(run: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    span = sd.periods(run).get(sd.scored_window_name(run), "")
+    start, _, stop = span.partition(" to ")
+    return (pd.Timestamp(start.strip()), pd.Timestamp(stop.strip())) if start and stop else None
+
+
+def stations_at(run: str, when) -> list[dict]:
+    """One record per station in the run's sfincs.obs, for the frame at `when`
+    (a Timestamp) or for the max view (`when == "max"`)."""
+    points = mc.read_points(sd.run_path(run, "sfincs.obs"))
+    his = sd.station_levels(run)
+    obs = gauge_obs(run)
+    scored = set(obs["site"])
+    out = []
+    for x, y, name in points:
+        lon, lat = mc.to_lonlat(x, y)
+        model = his[name] if name in his.columns else pd.Series(dtype=float)
+        rec = {"name": name, "position": [float(lon), float(lat)], "kind": "modelled",
+               "error": None, "fill": CLEAR, "line": DARK}
+        if when == "max":
+            level = float(model.max()) if len(model) else float("nan")
+            t_model = model.idxmax() if len(model) else None
+            text = (f"max model {level:.2f} m at {t_model:%d %b %H:%M}" if t_model is not None
+                    else "model: n/a")
+        else:
+            level = _model_at(model, when)
+            text = f"model {level:.2f} m"
+        if name in scored:
+            readings = obs.loc[obs["site"] == name].set_index("time")["level_m"]
+            if when == "max":
+                win = _score_window(run)
+                inside = readings.loc[win[0]:win[1]] if win else readings.iloc[0:0]
+                if len(inside) and np.isfinite(level):
+                    g, tg = float(inside.max()), inside.idxmax()
+                    err = level - g
+                    rec.update(kind="gauge", error=err, fill=error_colour(err))
+                    text += f"; max gauge {g:.2f} m at {tg:%d %b %H:%M}; error {err:+.2f} m"
+                else:
+                    rec.update(kind="no_reading", fill=GREY)
+                    text += "; no gauge reading in the scoring window"
+            else:
+                gaps = np.abs((readings.index - pd.Timestamp(when)).total_seconds())
+                i = int(np.argmin(gaps)) if len(gaps) else -1     # argmin: first of equal gaps = earlier
+                if i >= 0 and gaps[i] <= PAIR_TOLERANCE.total_seconds():
+                    tg, g = readings.index[i], float(readings.iloc[i])
+                    m_at = _model_at(model, tg)
+                    err = m_at - g
+                    rec.update(kind="gauge", error=err, fill=error_colour(err))
+                    text = f"model {m_at:.2f} m vs gauge {g:.2f} m at {tg:%H:%M}; error {err:+.2f} m"
+                else:
+                    rec.update(kind="no_reading", fill=GREY)
+                    text += "; gauge: no reading this hour"
+        else:
+            text += "; modelled only"
+            if name in RELATIVE_ONLY:
+                text += f" ({RELATIVE_ONLY[name]})"
+        rec["text"] = text
+        out.append(rec)
+    return out
+
+
+def _reproject(coords):
+    if coords and isinstance(coords[0], (int, float)):
+        lon, lat = _GEOJSON_TO_LONLAT.transform(coords[0], coords[1])
+        return [float(lon), float(lat)]
+    return [_reproject(c) for c in coords]
+
+
+def _geojson_lonlat(path: Path) -> dict:
+    data = json.loads(path.read_text())
+    data.pop("crs", None)
+    for feature in data.get("features", []):
+        geom = feature.get("geometry")
+        if geom:
+            geom["coordinates"] = _reproject(geom["coordinates"])
+    return data
+
+
+def overlays(run: str) -> dict:
+    """Stations/boundary/inflows from the run's own files; the active-area
+    outline and channel centrelines from the shared inputs/ (labelled
+    "current inputs" in the UI, since a run directory has no copy)."""
+    out: dict = {"missing": []}
+    for key, fname in (("boundary", "sfincs.bnd"), ("inflows", "sfincs.src")):
+        path = sd.run_path(run, fname)
+        if path.is_file():
+            pts = mc.read_points(path)
+            lon, lat = mc.to_lonlat([p[0] for p in pts], [p[1] for p in pts])
+            out[key] = [{"position": [float(a), float(b)]} for a, b in zip(np.atleast_1d(lon), np.atleast_1d(lat))]
+        else:
+            out[key] = []
+            out["missing"].append(fname)
+    inputs = Path(sd.DATA_DIR) / "inputs"
+    for key, fname in (("outline", "active_region.geojson"), ("channels", "channels.geojson")):
+        path = inputs / fname
+        if path.is_file():
+            out[key] = _geojson_lonlat(path)
+        else:
+            out[key] = dict(EMPTY_FC)
+            out["missing"].append(fname)
+    return out
+
+
+TITLES = {"level": "Water level (m, model datum)",
+          "change": "Change from start (m), relative to the starting water level nearby"}
+
+
+def legend(rm: RunMaps, quantity: str, is_max: bool) -> dict:
+    vmin, vmax = rm.ranges[quantity]
+    cmap = colormaps[CMAPS[quantity]]
+    notes = ["blank = dry (SFINCS's own wet/dry)"]
+    if is_max:
+        notes.insert(0, "maximum over the run, clipped to the playback range")
+    if not rm.cached:
+        notes.append("colour range from three frames: run the export for this run")
+    return {"title": TITLES[quantity], "vmin": float(vmin), "vmax": float(vmax),
+            "colors": [to_hex(cmap(i / 8)) for i in range(9)], "notes": notes}
