@@ -71,6 +71,10 @@ run name's prefix, as `validate.py --run` does). Per run it writes:
   row-major, so one cell's series is one contiguous row (read by `np.load(...,
   mmap_mode="r")`). Rows are the active cells in `np.flatnonzero(msk > 0)`
   order; dry values are stored as NaN. About 430 MB for April, 210 MB for Xaver.
+  float16 resolves ~2 mm at the lagoon's 0–4 m levels but only ~3 cm at the
+  highest wet cells (ground up to 55 m); the click plot is for behaviour, not
+  scoring, so that is accepted — the station markers and `validate.py` read
+  `sfincs_his.nc` at full precision.
 - **`runs/<run>/map_meta.json`** — hour labels (UTC ISO strings), the active
   cell count, the colour ranges (below), and the `sfincs_map.nc` mtime the cache
   was built from, so the app can detect a stale cache and fall back.
