@@ -25,6 +25,11 @@ GAUGES = ("Klaipeda", "Nida", "Vente", "Uostadvaris")
 # uplands check below stay focused on the area the success criteria actually talk about.
 VALIDATION_WINDOW = (325_000, 6_105_000, 360_000, 6_145_000)
 
+# C3 and A4 compare the model with the Klaipeda 06:00 readings the sea boundary
+# is fitted to (prep.make_forcing.daily_fit_correction), so they report the fit
+# as context and never count as passed or failed.
+FITTED_NOTE = "n/a -- the sea boundary is fitted to these readings; not an independent test"
+
 STORM_WINDOW = (pd.Timestamp("2013-12-05 00:00"), pd.Timestamp("2013-12-09 00:00"))
 
 
@@ -204,16 +209,17 @@ def xaver_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.
         "verdict": verdict2,
     })
 
-    # C3: Klaipeda RMSE, storm window (the pass/fail check) vs whole period (context).
+    # C3: Klaipeda. The sea boundary is fitted to these same 06:00 readings
+    # (make_forcing.daily_fit_correction), so this can no longer fail on the
+    # model's merit: it is reported as context ("info"), not scored.
     obs_k = obs_by_site["Klaipeda"]
     s3_storm = skill(his["Klaipeda"], obs_k.loc[STORM_WINDOW[0]:STORM_WINDOW[1]])
     s3_full = skill(his["Klaipeda"], obs_k)
-    c3_ok = s3_storm["rmse"] <= 0.15
     out.append({
-        "name": "C3 Klaipeda RMSE", "window": _window_label(STORM_WINDOW),
+        "name": "C3 Klaipeda boundary fit", "window": _window_label(STORM_WINDOW),
         "value": f"storm RMSE {s3_storm['rmse']:.2f} m (whole-period RMSE {s3_full['rmse']:.2f} m)",
-        "threshold": "storm-window RMSE <= 0.15 m",
-        "verdict": "met" if c3_ok else "not met",
+        "threshold": FITTED_NOTE,
+        "verdict": "info",
     })
 
     # C4: no spurious flooding of the Silute uplands.
@@ -253,11 +259,6 @@ def xaver_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path = common.
 APRIL_CREST = (pd.Timestamp("2013-04-22"), pd.Timestamp("2013-04-26"))
 APRIL_FILL_LEVEL = 0.20      # m; the rising limb crosses it at 10-18 cm/day
 PLATEAU_TIE_M = 0.05         # daily gauge readings this close are the same crest
-# A4's no-skill bar. Fixed and reproducible rather than derived from the observed
-# sd, but only a real test of skill while that sd exceeds it -- today's Klaipeda
-# sd is ~0.089 m, clearing this by just 4 mm. See A4's block below for what
-# happens if that margin is ever lost.
-A4_RMSE_MAX = 0.085          # m
 
 
 def _first_crossing(s: pd.Series, level: float) -> pd.Timestamp:
@@ -318,7 +319,10 @@ def april_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path | None = 
                 "threshold": "model peak inside the observed plateau +/-12 h",
                 "verdict": "met" if p0 <= t_peak <= p1 else "not met"})
 
-    # A3: the head the river holds above the sea, averaged over the crest. Matched
+    # A3: the head the river holds above the sea, averaged over the crest. With the
+    # sea boundary fitted to the Klaipeda readings, the sea end of this head is
+    # constrained by construction, so A3 in effect tests the delta end
+    # (Uostadvaris) -- still an independent check, and the one that matters. Matched
     # on the calendar date (not the exact timestamp) so the 26th's 06:00 reading is
     # included along with 22-25's -- the window is a set of days, not a half-open
     # instant range, and excluding the last day would silently narrow the average
@@ -338,24 +342,14 @@ def april_criteria(his: pd.DataFrame, obs_by_site: dict, run_dir: Path | None = 
     out.append({"name": "A3 delta-to-sea head", "window": _window_label(APRIL_CREST),
                 "value": value3, "threshold": "mean head within +/-0.15 m", "verdict": verdict3})
 
-    # A4: the sea must beat the no-skill baseline (A4_RMSE_MAX, above), not merely
-    # sit near the mean. If sigma ever fell to or below that threshold, a flat,
-    # no-skill series would clear the RMSE bar too, and reporting "met" would
-    # claim a no-skill test that was no longer actually being performed. Report
-    # "n/a" instead of a false "met".
+    # A4: Klaipeda. Context only, as for Xaver's C3 -- the sea boundary is
+    # fitted to these readings, so this is not an independent test.
     s4 = skill(his["Klaipeda"], obs_k)
     sigma = float(obs_k.std(ddof=0))
-    if sigma <= A4_RMSE_MAX:
-        verdict4 = "n/a"
-        threshold4 = (f"RMSE <= {A4_RMSE_MAX:.3f} m -- not a real test here: the observed sd "
-                      f"({sigma:.3f} m) no longer exceeds this, so a flat series would pass too")
-    else:
-        verdict4 = "met" if s4["rmse"] <= A4_RMSE_MAX else "not met"
-        threshold4 = f"RMSE <= {A4_RMSE_MAX:.3f} m (below the observed sd of {sigma:.3f} m: a flat series fails)"
-    out.append({"name": "A4 Klaipeda control", "window": _window_label((lo, hi)),
+    out.append({"name": "A4 Klaipeda boundary fit", "window": _window_label((lo, hi)),
                 "value": f"RMSE {s4['rmse']:.3f} m against an observed sd of {sigma:.3f} m",
-                "threshold": threshold4,
-                "verdict": verdict4})
+                "threshold": FITTED_NOTE,
+                "verdict": "info"})
 
     # A5: Xaver's C4, same logic including the no-uplands value guard (see
     # c4_verdict's docstring). Whole-run by construction -- dtmaxout gives one

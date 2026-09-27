@@ -1,5 +1,5 @@
-GTSM offset applied: -0.212 m (calm window 2013-04-05..2013-04-11)
-boundary level: start -0.30 m, crest peak -0.01 m at 2013-04-25 01:00:00
+GTSM corrected by 29 Klaipeda 06:00 readings: residual -0.280..+0.078 m (mean -0.100), largest gap 24 h
+boundary level: start -0.35 m, crest peak 0.16 m at 2013-04-25 01:00:00
 Klaipeda 06h obs peak: 0.15 m at 2013-04-24 06:00:00
 wind peak: 12.2 m/s at 2013-04-25 01:00:00 from 265 deg
 Nemunas Q: 400..2150 m3/s; Minija constant 83.0 m3/s

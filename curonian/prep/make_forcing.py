@@ -47,11 +47,54 @@ def load_rusne_levels(event: common.Event) -> pd.Series:
     return s.loc[event.data_window[0]:event.data_window[1]]
 
 
-def bias_correct(model: pd.Series, obs: pd.Series, window) -> tuple[pd.Series, float]:
-    obs_w = obs.loc[window[0]:window[1]]
-    model_at_obs = model.reindex(obs_w.index, method="nearest", tolerance=pd.Timedelta("1h"))
-    offset = float(obs_w.mean() - model_at_obs.mean())
-    return model + offset, offset
+MAX_READING_GAP = pd.Timedelta("3D")
+
+
+def daily_fit_correction(model: pd.Series, obs06: pd.Series,
+                         index: pd.DatetimeIndex) -> tuple[pd.Series, dict]:
+    """The model series on `index`, corrected by the Klaipeda 06:00 readings.
+
+    The residual (reading - model) at each 06:00 reading is interpolated
+    linearly in time and added to the model; beyond the first and last
+    reading it is held flat. This replaces a single calm-window offset: GTSM's
+    error at Klaipeda is dominated by a slow drift (up to ~0.12 m over an
+    event) that one offset cannot follow, while its sub-2-day signal is good
+    to ~3 cm. Tested on the EPA hourly tide gauge (Copernicus in-situ
+    BO_TS_TG_Klaipeda) over 19 event-sized windows in Oct 2012-Aug 2013,
+    where the LHMT 06:00 readings match that gauge within 2.6 cm: median RMSE
+    0.052 -> 0.028 m, storm-peak error 0.065 -> 0.021 m, better in 19/19.
+
+    The readings used are those inside `index` plus the nearest one on each
+    side; a gap between them longer than MAX_READING_GAP raises rather than
+    interpolating across it, and so does a run end that far beyond the
+    outermost reading. The residual also absorbs the gauge-zero offset,
+    so the result is on the gauges' datum.
+    """
+    resid = (obs06 - model.reindex(obs06.index)).dropna()
+    if resid.empty:
+        raise ValueError("no Klaipeda 06:00 reading falls where the model series has values")
+    before = resid.index[resid.index <= index[0]]
+    after = resid.index[resid.index >= index[-1]]
+    used = resid.loc[(before[-1] if len(before) else resid.index[0]):
+                     (after[0] if len(after) else resid.index[-1])]
+    edges = [(used.index[0] - index[0], "before the first reading"),
+             (index[-1] - used.index[-1], "after the last reading")]
+    for span, where in edges:
+        if span > MAX_READING_GAP:
+            raise ValueError(f"the run extends {span} {where} (limit {MAX_READING_GAP}): "
+                             "no Klaipeda 06:00 reading constrains the boundary there")
+    gaps = used.index.to_series().diff().dropna()
+    max_gap = gaps.max() if len(gaps) else pd.Timedelta(0)
+    if max_gap > MAX_READING_GAP:
+        at = gaps.idxmax()
+        raise ValueError(f"Klaipeda 06:00 readings have a gap of {max_gap} ending {at} "
+                         f"(limit {MAX_READING_GAP}): too long to interpolate the boundary across")
+    corr = (used.reindex(used.index.union(index)).interpolate(method="time")
+                .ffill().bfill().reindex(index))
+    info = {"n_readings": int(len(used)), "max_gap_h": max_gap / pd.Timedelta("1h"),
+            "resid_min": float(used.min()), "resid_max": float(used.max()),
+            "resid_mean": float(used.mean())}
+    return model.reindex(index) + corr, info
 
 
 def boundary_forcing(gtsm: pd.Series, npoints: int, event: common.Event) -> pd.DataFrame:
@@ -171,7 +214,8 @@ def main(event: common.Event, static: Path = common.INPUTS, use_cmems: bool = Fa
     # anyway (no wlevel_18 rows exist for this site).
     klaipeda = load_gauge_levels("Klaipeda", event)
     klaipeda_06 = klaipeda.loc[klaipeda.index.hour == 6]
-    corrected, offset = bias_correct(gtsm, klaipeda_06, event.calm_window)
+    hours = pd.date_range(event.tref, event.tstop, freq="h")
+    corrected, fit = daily_fit_correction(gtsm, klaipeda_06, hours)
     bnd_pts = gpd.read_file(static / "boundary_points.geojson")             # static, shared
     bzs = boundary_forcing(corrected, len(bnd_pts), event)
     bzs.to_csv(out / "bzs.csv", index_label="time", float_format=common.CSV_FLOAT_FMT)
@@ -184,7 +228,9 @@ def main(event: common.Event, static: Path = common.INPUTS, use_cmems: bool = Fa
     common.write_geojson(discharge_points(), static / "dis_points.geojson")  # static, shared: both events discharge at the same two points
 
     peak = corrected.loc[event.peak_window[0]:event.peak_window[1]]
-    summary = (f"GTSM offset applied: {offset:+.3f} m (calm window {event.calm_window[0].date()}..{event.calm_window[1].date()})\n"
+    summary = (f"GTSM corrected by {fit['n_readings']} Klaipeda 06:00 readings: residual "
+               f"{fit['resid_min']:+.3f}..{fit['resid_max']:+.3f} m (mean {fit['resid_mean']:+.3f}), "
+               f"largest gap {fit['max_gap_h']:.0f} h\n"
                f"boundary level: start {corrected.loc[event.tref]:.2f} m, "
                f"{event.peak_label} peak {peak.max():.2f} m at {peak.idxmax()}\n"
                f"Klaipeda 06h obs peak: {klaipeda_06.max():.2f} m at {klaipeda_06.idxmax()}\n"

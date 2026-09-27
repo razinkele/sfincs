@@ -9,14 +9,51 @@ APRIL = common.event("april_2013")
 XAVER = common.event("xaver_2013")
 
 
-def test_bias_correct_aligns_calm_window_means():
-    t = pd.date_range("2013-11-27", "2013-12-10", freq="h")
-    model = pd.Series(0.5 + 0.1 * np.sin(np.arange(len(t)) / 10), index=t)
-    obs = pd.Series(0.05, index=pd.date_range("2013-11-28 06:00", "2013-12-03 06:00", freq="D"))
-    corrected, offset = mf.bias_correct(model, obs, common.CALM_WINDOW)
-    win = corrected.loc[common.CALM_WINDOW[0]:common.CALM_WINDOW[1]]
-    assert abs(win.reindex(obs.index, method="nearest").mean() - 0.05) < 1e-9
-    assert abs(offset - (0.05 - model.reindex(obs.index, method="nearest").mean())) < 1e-9
+def _drifting(hours: pd.DatetimeIndex, drift_m: float = 0.15, days: float = 9.0) -> pd.Series:
+    """A slow sinusoidal drift, like GTSM's multi-day level error at Klaipeda."""
+    x = (hours - hours[0]) / pd.Timedelta("1D")
+    return pd.Series(drift_m * np.sin(2 * np.pi * np.asarray(x) / days), index=hours)
+
+
+def test_daily_fit_recovers_a_slow_drift_from_06_00_samples():
+    """GTSM + slow drift, sampled once a day at 06:00, must give back the truth
+    between samples to within the linear-interpolation error of the drift."""
+    t = pd.date_range("2013-11-20", "2013-12-20", freq="h")
+    truth = pd.Series(0.3 * np.sin(np.arange(len(t)) / 6.0), index=t)        # fast signal GTSM gets right
+    model = truth - _drifting(t) - 0.20                                         # GTSM: drift + datum offset
+    obs06 = truth[truth.index.hour == 6]
+    fitted, info = mf.daily_fit_correction(model, obs06, t)
+    err = (fitted - truth).loc[obs06.index[0]:obs06.index[-1]]   # between readings; ends are held flat
+    assert err.abs().max() < 0.012                     # linear-interp error of the drift; 0.35 m uncorrected
+    assert (fitted - truth)[obs06.index].abs().max() < 1e-9      # exact at the readings
+    assert info["max_gap_h"] == 24.0
+    assert info["resid_min"] < info["resid_max"]
+
+
+def test_daily_fit_holds_the_end_residuals_flat():
+    t = pd.date_range("2013-11-30", "2013-12-04", freq="h")
+    model = pd.Series(0.0, index=t)
+    obs06 = pd.Series([0.1, 0.3], index=pd.to_datetime(["2013-12-01 06:00", "2013-12-03 06:00"]))
+    fitted, _ = mf.daily_fit_correction(model, obs06, t)
+    assert fitted.iloc[0] == pytest.approx(0.1) and fitted.iloc[-1] == pytest.approx(0.3)
+    assert fitted.loc["2013-12-02 06:00"] == pytest.approx(0.2)
+
+
+def test_daily_fit_refuses_to_bridge_a_long_gap_inside_the_run():
+    t = pd.date_range("2013-11-28", "2013-12-11", freq="h")
+    model = pd.Series(0.0, index=t)
+    days = pd.to_datetime(["2013-11-28 06:00", "2013-11-29 06:00"]).append(
+        pd.date_range("2013-12-04 06:00", "2013-12-11 06:00", freq="D"))    # 29 Nov -> 4 Dec: 5 days
+    with pytest.raises(ValueError, match="gap of 5 days"):
+        mf.daily_fit_correction(model, pd.Series(0.1, index=days), t)
+
+
+def test_daily_fit_ignores_readings_the_model_does_not_cover():
+    t = pd.date_range("2013-11-28", "2013-12-11", freq="h")
+    model = pd.Series(0.0, index=t)
+    obs06 = pd.Series(0.1, index=pd.date_range("2013-11-20 06:00", "2013-12-20 06:00", freq="D"))
+    fitted, info = mf.daily_fit_correction(model, obs06, t)
+    assert fitted.notna().all() and np.allclose(fitted, 0.1) and info["n_readings"] == 13
 
 
 def test_boundary_forcing_covers_period_on_all_points():
@@ -51,24 +88,6 @@ def test_real_gauges_and_discharge():
     q = mf.discharge_forcing(XAVER)
     assert q.index[0] == common.TREF and q.index[-1] == common.TSTOP
     assert 350 < q[1].loc["2013-12-01":"2013-12-05"].mean() < 600 and (q[2] == common.MINIJA_Q_DEC).all()
-
-
-def test_bias_correct_ignores_observations_outside_the_calm_window():
-    """The offset must come from the calm window only.
-
-    The existing test puts every observation inside the window, so the `obs.loc[
-    window]` clip never does anything. Here the out-of-window readings are wildly
-    off: if they leaked into the mean, the offset would move by ~5 m.
-    """
-    t = pd.date_range("2013-11-27", "2013-12-10", freq="h")
-    model = pd.Series(0.5, index=t)
-    inside = pd.Series(0.05, index=pd.date_range("2013-11-28 06:00", "2013-12-03 06:00", freq="D"))
-    outside = pd.Series(10.0, index=pd.date_range("2013-12-06 06:00", "2013-12-09 06:00", freq="D"))
-    obs = pd.concat([inside, outside]).sort_index()
-
-    corrected, offset = mf.bias_correct(model, obs, common.CALM_WINDOW)
-    assert abs(offset - (0.05 - 0.5)) < 1e-9
-    assert abs(corrected.iloc[0] - 0.05) < 1e-9
 
 
 def test_boundary_forcing_raises_when_the_period_cannot_be_filled():
@@ -120,3 +139,11 @@ def test_april_discharge_carries_the_freshet_and_its_own_minija():
 def test_april_gauge_levels_reach_the_observed_crest():
     obs = mf.load_gauge_levels("Uostadvaris", APRIL)
     assert abs(obs.loc["2013-04-24 06:00"] - 0.54) < 1e-9
+
+
+def test_daily_fit_refuses_a_run_end_far_from_any_reading():
+    t = pd.date_range("2013-11-28", "2013-12-11", freq="h")
+    model = pd.Series(0.0, index=t)
+    days = pd.date_range("2013-11-28 06:00", "2013-12-05 06:00", freq="D")   # stops 6 days short
+    with pytest.raises(ValueError, match="after the last reading"):
+        mf.daily_fit_correction(model, pd.Series(0.1, index=days), t)
