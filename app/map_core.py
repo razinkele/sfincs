@@ -138,3 +138,121 @@ def compute_warp(grid: Grid, pixel_m: float = PIXEL_M) -> Warp:
     lon0, lat0 = _WEB_TO_LONLAT.transform(west, south)
     lon1, lat1 = _WEB_TO_LONLAT.transform(east, north)
     return Warp(index=index, bounds=(float(lon0), float(lat0), float(lon1), float(lat1)))
+
+
+def compute_baseline(zs0: np.ndarray, active: np.ndarray) -> np.ndarray:
+    """Change-from-start baseline, continuous across the starting shoreline:
+    zs[0] where wet at the start, else zs[0] of the nearest wet-at-start cell.
+    No clip to zb -- every newly wet real cell has its bed minimum above the
+    nearby starting level, so a clip would restore the step (spec, measured)."""
+    wet0 = active & np.isfinite(zs0)
+    if not wet0.any():
+        raise ValueError("no wet cell in the first frame: change from start is undefined")
+    _, (ii, jj) = ndimage.distance_transform_edt(~wet0, return_indices=True)
+    base = zs0[ii, jj].astype(np.float32)
+    base[~active] = np.nan
+    return base
+
+
+class RangeHistogram:
+    """Streamed percentiles on fixed 1 mm bins over HIST_LO..HIST_HI (clamped),
+    so a whole run's ranges never need every value in memory at once."""
+
+    def __init__(self) -> None:
+        self.counts = np.zeros(int(round((HIST_HI - HIST_LO) / HIST_BIN)), np.int64)
+
+    def add(self, values) -> None:
+        v = np.asarray(values, dtype=np.float64).ravel()
+        v = v[np.isfinite(v)]
+        if v.size == 0:
+            return
+        k = np.clip(np.floor((v - HIST_LO) / HIST_BIN).astype(np.int64), 0, self.counts.size - 1)
+        self.counts += np.bincount(k, minlength=self.counts.size)
+
+    def percentile(self, q: float) -> float:
+        total = int(self.counts.sum())
+        if total == 0:
+            raise ValueError("no values in the histogram")
+        k = int(np.searchsorted(np.cumsum(self.counts), q / 100.0 * total))
+        return HIST_LO + (k + 0.5) * HIST_BIN
+
+
+def colour_ranges(level: RangeHistogram, change: RangeHistogram) -> dict[str, list[float]]:
+    lo, hi = level.percentile(2), level.percentile(98)
+    if hi - lo < MIN_RANGE_M:
+        mid = (lo + hi) / 2
+        lo, hi = mid - MIN_RANGE_M / 2, mid + MIN_RANGE_M / 2
+    top = max(change.percentile(98), MIN_RANGE_M / 2)
+    return {"level": [round(lo, 4), round(hi, 4)], "change": [-round(top, 4), round(top, 4)]}
+
+
+def source_stamp(map_nc: Path) -> dict:
+    st = Path(map_nc).stat()
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+
+def cache_valid(run_dir: Path) -> bool:
+    """A cache is valid only if every file exists and map_meta.json records the
+    current sfincs_map.nc size and mtime. Missing or stale meta invalidates all."""
+    run_dir = Path(run_dir)
+    map_nc = run_dir / "sfincs_map.nc"
+    if not map_nc.is_file() or not all((run_dir / f).is_file() for f in CACHE_FILES):
+        return False
+    try:
+        recorded = json.loads((run_dir / "map_meta.json").read_text())["source"]
+    except (OSError, ValueError, KeyError):
+        return False
+    return recorded == source_stamp(map_nc)
+
+
+def atomic_save(path: Path, writer: Callable[[Path], None]) -> None:
+    """writer(tmp) writes a temporary file next to `path`, which then replaces
+    `path` in one step, so a live reader (a memmap in the app) never sees a
+    truncated file. The temp name keeps the suffix, so np.save/np.savez do not
+    append another one."""
+    path = Path(path)
+    tmp = path.with_name(f".tmp-{os.getpid()}-{path.name}")
+    try:
+        writer(tmp)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def export_cache(run_dir: Path) -> dict:
+    """Write zs_series.npy, map_baseline.npy, map_warp.npz and, last,
+    map_meta.json for one run. Returns the meta dict."""
+    run_dir = Path(run_dir)
+    map_nc = run_dir / "sfincs_map.nc"
+    stamp = source_stamp(map_nc)             # taken first: a file changed mid-export stays invalid
+    grid = read_grid(map_nc)
+    active_flat = np.flatnonzero(grid.active.ravel())
+    nt = len(grid.times)
+    baseline = compute_baseline(read_frame(map_nc, 0), grid.active)
+    by_time = np.empty((nt, active_flat.size), np.float16)
+    level_hist, change_hist = RangeHistogram(), RangeHistogram()
+    with NC_LOCK, nc.Dataset(map_nc) as d:
+        for t in range(nt):
+            zs = _nan(d["zs"][t])
+            by_time[t] = zs.ravel()[active_flat]
+            level_hist.add(zs[grid.active])
+            change_hist.add(np.abs(zs - baseline)[grid.active])
+    series = np.ascontiguousarray(by_time.T)     # one cell's series = one contiguous row
+    del by_time
+    warp = compute_warp(grid)
+    meta = {
+        "run": run_dir.name,
+        "source": stamp,
+        "shape": list(grid.shape),
+        "n_active": int(active_flat.size),
+        "hours": hour_labels(grid.times),
+        "ranges": colour_ranges(level_hist, change_hist),
+    }
+    atomic_save(run_dir / "zs_series.npy", lambda p: np.save(p, series))
+    atomic_save(run_dir / "map_baseline.npy", lambda p: np.save(p, baseline))
+    atomic_save(run_dir / "map_warp.npz",
+                lambda p: np.savez(p, index=warp.index, bounds=np.asarray(warp.bounds)))
+    atomic_save(run_dir / "map_meta.json", lambda p: p.write_text(json.dumps(meta, indent=1)))
+    return meta
