@@ -81,6 +81,15 @@ class Playback:
         return self.pending and self.acked >= self.sent
 
 
+def current_series(result: tuple[str, md.CellSeries | None] | None,
+                   run: str) -> md.CellSeries | None:
+    """The clicked cell's series if it belongs to `run`; None for no result or
+    a result left over from another run (shown as if nothing were clicked)."""
+    if result is None or result[0] != run:
+        return None
+    return result[1]
+
+
 def map_layers(rm: md.RunMaps, ov: dict, image: str) -> list[dict]:
     """Bottom to top. Only the stations are pickable: the tooltip is one
     widget-wide template and would pop up blank over any other pickable layer."""
@@ -148,6 +157,7 @@ def map_server(input, output, session, variant) -> None:
     async def _on_run():
         rm = run_maps()
         pb.switch(variant())
+        _series_task.cancel()          # a read for the previous run must not land on this one
         hour.set(0)
         _set_playing(False)
         ui.update_slider("map_hour", min=0, max=max(_n_frames() - 1, 1), value=0)
@@ -277,7 +287,7 @@ def map_server(input, output, session, variant) -> None:
 
     @reactive.extended_task
     async def _series_task(rm, lon, lat):
-        return await asyncio.to_thread(md.cell_series, rm, lon, lat)
+        return rm.run, await asyncio.to_thread(md.cell_series, rm, lon, lat)
 
     @reactive.effect
     @reactive.event(input[MAP.map_click_input_id])
@@ -294,7 +304,7 @@ def map_server(input, output, session, variant) -> None:
         (lets the acceptance test tell a real plot from the placeholder)."""
         if _series_task.status() != "success":
             return ""
-        cs = _series_task.result()
+        cs = current_series(_series_task.result(), variant())
         if cs is None or cs.series.isna().all():
             return ""
         return f"cell row {cs.row}, col {cs.col}"
@@ -310,14 +320,18 @@ def map_server(input, output, session, variant) -> None:
             ax.set_axis_off()
             return fig
 
-        if status == "initial":
-            return message("Click the map to plot a cell's water level through the run.")
+        placeholder = "Click the map to plot a cell's water level through the run."
+        if status in ("initial", "cancelled"):
+            return message(placeholder)
         if status == "running":
             return message("Reading from the map file (~4 s)…" if rm is not None and not rm.cached
                            else "Reading…")
         if status == "error":
             return message("Could not read this cell.")
-        cs = _series_task.result()
+        result = _series_task.result()
+        if result[0] != variant():
+            return message(placeholder)    # the previous run's cell
+        cs = current_series(result, variant())
         if cs is None:
             return message("That point is outside the model's active area.")
         if cs.series.isna().all():
@@ -327,7 +341,14 @@ def map_server(input, output, session, variant) -> None:
         if input.map_max():
             ax.axhline(cs.zsmax, color="#c0392b", linewidth=1, label="max")
         elif rm is not None:
-            ax.axvline(rm.times[min(hour(), len(rm.times) - 1)], color="#c0392b", linewidth=1)
+            # Follow the hour only while paused: re-rendering this PNG every tick
+            # would bypass the frame acknowledgement gate.
+            if playing():
+                with reactive.isolate():
+                    h = hour()
+            else:
+                h = hour()
+            ax.axvline(rm.times[min(h, len(rm.times) - 1)], color="#c0392b", linewidth=1)
         ax.set_title(f"cell row {cs.row}, col {cs.col}  (x {cs.x:.0f}, y {cs.y:.0f}, EPSG:3346)"
                      + ("  — read from the map file" if cs.slow else ""), fontsize="small")
         ax.set_ylabel("m")

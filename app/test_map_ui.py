@@ -83,3 +83,10 @@ def test_layers_build_for_every_published_variant(variant):
     rm = md.load_run(variant)
     layers = mu.map_layers(rm, md.overlays(variant), "data:image/png;base64,")
     assert layers[0]["id"] == "water"
+
+
+def test_current_series_keeps_only_the_current_runs_result():
+    cs = object()
+    assert mu.current_series(("april", cs), "april") is cs
+    assert mu.current_series(("april", cs), "xaver") is None     # stale: previous run's cell
+    assert mu.current_series(None, "april") is None
