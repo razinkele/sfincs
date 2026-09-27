@@ -90,3 +90,13 @@ def test_current_series_keeps_only_the_current_runs_result():
     assert mu.current_series(("april", cs), "april") is cs
     assert mu.current_series(("april", cs), "xaver") is None     # stale: previous run's cell
     assert mu.current_series(None, "april") is None
+
+
+def test_an_unsent_frame_releases_the_gate():
+    """A frame claimed but never sent (its render failed) must not leave the
+    gate waiting for an acknowledgement that can never arrive."""
+    pb = mu.Playback()
+    pb.switch("a")
+    seq = pb.claim_send()
+    pb.release(seq)
+    assert pb.claim_send() == seq + 1        # the next frame goes straight out

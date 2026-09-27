@@ -261,6 +261,32 @@ def test_safe_load_reports_an_unreadable_map_instead_of_raising(synthetic, monke
         assert rm is None and err and type(exc).__name__ in err
 
 
+@pytest.mark.parametrize("missing", ["zs", "zb", "msk"])
+def test_safe_load_reports_a_map_file_missing_a_variable(synthetic, missing):
+    """A map file that opens but lacks a variable (truncated write, wrong file
+    swapped in): netCDF4 raises IndexError for the missing name, which must
+    become a message, not an exception that closes the session."""
+    path = sd.RUNS_DIR / synthetic / "sfincs_map.nc"
+    with nc.Dataset(path) as src, nc.Dataset(path.with_suffix(".tmp"), "w") as dst:
+        for name, dim in src.dimensions.items():
+            dst.createDimension(name, len(dim))
+        for name, var in src.variables.items():
+            if name == missing:
+                continue
+            out = dst.createVariable(name, var.dtype, var.dimensions,
+                                     fill_value=getattr(var, "_FillValue", None))
+            out.setncatts({k: var.getncattr(k) for k in var.ncattrs() if k != "_FillValue"})
+            out[:] = var[:]
+    path.with_suffix(".tmp").replace(path)
+    rm, err = md.safe_load(synthetic)
+    assert rm is None
+    assert err and missing in err
+
+
 def test_safe_load_without_a_map_file_is_none_without_error(synthetic):
     (sd.RUNS_DIR / synthetic / "sfincs_map.nc").unlink()
     assert md.safe_load(synthetic) == (None, None)
+
+
+def test_read_errors_cover_what_netcdf_raises_for_a_missing_variable():
+    assert IndexError in md.READ_ERRORS

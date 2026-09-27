@@ -73,6 +73,12 @@ class Playback:
         self.pending = False
         return self.sent
 
+    def release(self, seq: int) -> None:
+        """Give back a claimed frame that was never sent (its render failed),
+        so the gate does not wait for an acknowledgement that cannot come."""
+        if seq == self.sent:
+            self.acked = max(self.acked, seq)
+
     def ack(self, run: str, seq: int) -> bool:
         """Record an acknowledgement; True if a held frame should now be sent."""
         if run != self.run:
@@ -139,6 +145,7 @@ def map_server(input, output, session, variant) -> None:
     hour = reactive.value(0)
     playing = reactive.value(False)
     resend = reactive.value(0)
+    frame_error = reactive.value(None)     # reason the last frame could not be drawn
 
     @reactive.calc
     def loaded():
@@ -161,6 +168,7 @@ def map_server(input, output, session, variant) -> None:
         rm = run_maps()
         pb.switch(variant())
         _series_task.cancel()          # a read for the previous run must not land on this one
+        frame_error.set(None)
         hour.set(0)
         _set_playing(False)
         ui.update_slider("map_hour", min=0, max=max(_n_frames() - 1, 1), value=0)
@@ -169,7 +177,12 @@ def map_server(input, output, session, variant) -> None:
             return
         with reactive.isolate():
             q = input.map_quantity()
-        await MAP.update(session, map_layers(rm, md.overlays(rm.run), md.frame_image(rm, 0, q)))
+        try:
+            first = md.frame_image(rm, 0, q)
+        except md.READ_ERRORS as exc:
+            frame_error.set(f"{type(exc).__name__}: {exc}"[:200])
+            first = ""                     # outlines and stations still draw; _send_frame retries
+        await MAP.update(session, map_layers(rm, md.overlays(rm.run), first))
 
     @reactive.effect(priority=10)
     async def _visibility():
@@ -228,8 +241,19 @@ def map_server(input, output, session, variant) -> None:
         seq = pb.claim_send()
         if seq is None:
             return                     # previous frame unacknowledged: _ack re-triggers us
-        image = md.frame_image(rm, when, q)
-        stations = md.stations_at(rm.run, "max" if is_max else rm.times[when])
+        try:
+            image = md.frame_image(rm, when, q)
+            stations = md.stations_at(rm.run, "max" if is_max else rm.times[when])
+        except md.READ_ERRORS as exc:
+            # The map file became unreadable after the run loaded (e.g. a model
+            # re-run rewriting it): stop and say so rather than let the error
+            # close the session.
+            pb.release(seq)
+            pb.pause()
+            _set_playing(False)
+            frame_error.set(f"{type(exc).__name__}: {exc}"[:200])
+            return
+        frame_error.set(None)
         await MAP.partial_update(session, [{"id": "water", "image": image},
                                            {"id": "stations", "data": stations}])
         await session.send_custom_message("map_frame_seq", {"run": rm.run, "seq": seq})
@@ -284,6 +308,9 @@ def map_server(input, output, session, variant) -> None:
             return ui.markdown(f"_The map could not be loaded for this run ({(err or 'unknown error')[:200]}); "
                                "the other tabs are unaffected._")
         notes = []
+        if frame_error() is not None:
+            notes.append(f"This frame could not be read from the map file ({frame_error()}); "
+                         "playback stopped. The file may be being rewritten — reload the page later.")
         if not rm.cached:
             notes.append("No valid map cache for this run: run "
                          f"`python -m prep.export_map_cache --run {v}` — clicks read the map file (a few seconds).")

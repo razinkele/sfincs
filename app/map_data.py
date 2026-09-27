@@ -71,6 +71,13 @@ def load_run(run: str) -> RunMaps:
     return _load_run(run, str(run_dir), tuple(_stat_key(p) for p in files))
 
 
+# What reading a run's files can raise when a file is missing, truncated or the
+# wrong file: IndexError is what netCDF4 raises (not KeyError) for a variable
+# missing from a file that otherwise opens. The Map tab turns these into a
+# message instead of letting them close the session.
+READ_ERRORS = (OSError, ValueError, KeyError, IndexError)
+
+
 def safe_load(run: str) -> tuple[RunMaps | None, str | None]:
     """(maps, None) on success; (None, None) when the run has no map file;
     (None, reason) when the file is there but cannot be read -- the Map tab
@@ -79,7 +86,7 @@ def safe_load(run: str) -> tuple[RunMaps | None, str | None]:
         return None, None
     try:
         return load_run(run), None
-    except (OSError, ValueError, KeyError) as exc:
+    except READ_ERRORS as exc:
         return None, f"{type(exc).__name__}: {exc}"
 
 
