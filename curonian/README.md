@@ -94,6 +94,16 @@ Tests: `micromamba run -n hydromt-sfincs python -m pytest tests -q`
   No `error`/`nan` in the solver log; `sfincs_his.nc` is finite everywhere
   over the full 5 Apr–2 May time axis. See "Results: April 2013" below for
   what the run produced.
+- 2026-09-27: April 2013 gridded wind and gridded wind + pressure runs
+  (`runs/april_2013_gridwind`, `runs/april_2013_gridwind_pressure`), built with
+  `build_model.py --event april_2013 --wind grid [--pressure]` on
+  `inputs/april_2013/era5_grid.nc`. Same `check_model()` gate as the baseline;
+  subgrid, mask, boundary, discharge and stations identical to `runs/april_2013`
+  (checked before running), so only the wind/pressure forcing differs. Run 83.9
+  and 85.6 min wall clock (5033 s and 5134 s SFINCS total) — both at once on 14
+  threads each, not the 16-thread single-run figure; mean dt 3.517 s in both,
+  unchanged from the baseline. No `error`/`nan` in either log; `sfincs_his.nc`
+  finite throughout. See "Sensitivity: gridded ERA5 wind and pressure (April)".
 
 ## Results: Xaver 2013
 
@@ -684,6 +694,41 @@ with a reason and a limit, so the next one cannot drift across a spit in silence
 
 All four runs in `results/` were rebuilt and re-run after both stations moved, so
 they carry the corrected `sfincs.obs`.
+
+## Sensitivity: gridded ERA5 wind and pressure (April)
+
+The same test as Xaver's, on the freshet: `prep/fetch_era5_grid.py --event
+april_2013` fetches the 0.25° ERA5 grid for April–May 2013 (same box and
+variables) into `inputs/april_2013/era5_grid.nc`, and two runs replace the
+uniform Nida wind with it — one with wind only, one with mean sea level
+pressure as well (`pavbnd = 0`, `baro = 1`, as for Xaver).
+`inputs/april_2013/era5_grid_summary.txt` records the fetch: 651 hourly steps
+on the 8×6-cell grid, 2013-04-04 23:00–2013-05-02 01:00; Nida-point wind speed
+RMSE 0.000 m/s against the uniform run's source; peak wind 12.7 m/s at
+2013-04-25 01:00 (55.50°N, 20.50°E), the same hour as `wind.csv`'s 12.2 m/s;
+pressure minimum 99866 Pa at 2013-04-12 18:00.
+
+Numbers pasted from `results/april_2013{,_gridwind,_gridwind_pressure}/validation.md`
+(scoring window, 13 Apr–2 May):
+
+| run | A1 Uostadvaris peak err m | A2a crossing dt h | A2b model crest | A3 head err m | A4 Klaipeda RMSE m | A6a Rusnė rise err m | Nida bias m | Ventė bias m | flooded area km² | verdicts met |
+|---|---|---|---|---|---|---|---|---|---|---|
+| baseline (uniform wind) | +0.05 | −89 | 25 Apr 00:10 | +0.23 | 0.176 | −0.12 | −0.13 | −0.00 | 66.5 | A1, A5, A6a, A6b |
+| gridded wind | +0.04 | −88 | 25 Apr 00:10 | +0.23 | 0.176 | −0.12 | −0.14 | −0.01 | 62.6 | A1, A5, A6a, A6b |
+| gridded wind + pressure | +0.04 | −88 | 25 Apr 00:10 | +0.23 | 0.176 | −0.12 | −0.14 | −0.01 | 62.4 | A1, A5, A6a, A6b |
+
+**Gridded forcing changes no April verdict, and no score by more than 0.02 m.**
+The four misses — A2a/A2b timing, A3 head, A4 sea boundary — move by at most
+1 h and 0.01 m across the three runs (A2b's crest time and A4's RMSE not at
+all). That is the expected answer
+for a freshet under light winds (peak 12–13 m/s, against Xaver's 20.6), and it
+is useful as a negative result: wind spatial structure, and pressure on top of
+it, can be struck off as causes of the April misses. What remains is what
+"Results: April 2013" already located — the sea end sitting ~0.16 m low
+(Klaipėda bias unchanged at −0.16 m in every variant, so A3 and A4 still move
+together) and the delta filling early. The only material change is flooded
+area, down 4 km² (−6 %), the same direction as Xaver's gridded runs (−17 %)
+but a third the size, consistent with a weaker wind over the delta.
 
 ## Reproducing from a clean checkout
 

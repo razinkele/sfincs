@@ -83,8 +83,8 @@ class Event:
 
 
 # No run_dir property: run directories are keyed by RUN NAME, not event name.
-# xaver_2013 alone owns runs/xaver_2013, runs/xaver_2013_gridwind and
-# runs/xaver_2013_gridwind_pressure, selected by --run-name / --run.
+# Each event owns runs/<event>, runs/<event>_gridwind and
+# runs/<event>_gridwind_pressure, selected by --run-name / --run.
 EVENTS = {
     "xaver_2013": Event(
         name="xaver_2013", title="Xaver 2013",
