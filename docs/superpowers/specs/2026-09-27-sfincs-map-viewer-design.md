@@ -294,8 +294,8 @@ blocked, with "reading from the map file (~4 s)" shown meanwhile.
 ## Deployment
 
 - App code ships through the existing `deploy.sh` (it rsyncs `app/`, including
-  `app/www/`, served through `App(..., static_assets=app/www)`); no new
-  dependencies.
+  `app/www/`, served by adding `"/www": app/www` to the `static_assets`
+  dictionary `App(...)` already passes for `/figures`); no new dependencies.
 - Shiny Server's default idle timeout ends the process soon after the last tab
   closes, so the frame LRU is effectively per visit. That is accepted: the
   export persists the warp, baseline and ranges, so a cold start only memmaps
