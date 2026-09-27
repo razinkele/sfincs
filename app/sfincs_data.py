@@ -1,7 +1,8 @@
 """Read-only access to SFINCS Curonian Lagoon model outputs.
 
-The viewer never writes to the model tree and never opens ``sfincs_map.nc``
-(~190 MB per run); station time series come from the small ``sfincs_his.nc``.
+The viewer never writes to the model tree. This module reads only the small
+files (reports, ``sfincs_his.nc``); the Map tab reads single frames of
+``sfincs_map.nc`` through ``map_data.py``.
 
 Data location is decoupled from the code location: the app is deployed to
 ``/srv/shiny-server/sfincs`` while ``runs/`` is gitignored and stays in the
@@ -248,7 +249,9 @@ def _station_names(ds, variant: str) -> list[str]:
 def _station_frame(variant: str, mtime: float) -> pd.DataFrame:
     import xarray as xr
 
-    with xr.open_dataset(run_path(variant, "sfincs_his.nc")) as ds:
+    from map_core import NC_LOCK     # netcdf-c is not thread-safe; see map_core.NC_LOCK
+
+    with NC_LOCK, xr.open_dataset(run_path(variant, "sfincs_his.nc")) as ds:
         values = ds["point_zs"].load().values
         index = pd.to_datetime(ds["time"].values)
         frame = pd.DataFrame(values, index=index, columns=_station_names(ds, variant))
