@@ -241,8 +241,9 @@ def stations_at(run: str, when) -> list[dict]:
         rec = {"name": name, "position": [float(lon), float(lat)], "kind": "modelled",
                "error": None, "fill": CLEAR, "line": DARK}
         if when == "max":
-            level = float(model.max()) if len(model) else float("nan")
-            t_model = model.idxmax() if len(model) else None
+            s = model.dropna()
+            level = float(s.max()) if len(s) else float("nan")
+            t_model = s.idxmax() if len(s) else None
             text = (f"max model {level:.2f} m at {t_model:%d %b %H:%M}" if t_model is not None
                     else "model: n/a")
         else:

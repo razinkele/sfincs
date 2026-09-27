@@ -177,6 +177,18 @@ def test_max_view_compares_maxima_in_the_scoring_window(synthetic):
     assert "05:00" in k["text"] and "03:00" in k["text"]
 
 
+def test_max_view_handles_an_all_dry_station_without_crashing(synthetic, monkeypatch):
+    _write_obs(synthetic, [("Klaipeda", "2013-04-05 02:00:00", -0.10)])
+    his = sd.station_levels(synthetic).copy()
+    his["Silute"] = float("nan")     # unscored station, entirely dry
+    his["Klaipeda"] = float("nan")   # scored station, entirely dry
+    monkeypatch.setattr(sd, "station_levels", lambda run: his)
+    at = _by_name(md.stations_at(synthetic, "max"))
+    assert set(at) == {"Klaipeda", "Rusne", "Silute"}
+    assert at["Silute"]["kind"] == "modelled" and "n/a" in at["Silute"]["text"]
+    assert at["Klaipeda"]["kind"] == "no_reading" and "n/a" in at["Klaipeda"]["text"]
+
+
 def test_no_gauge_csv_means_every_station_is_modelled_only(synthetic):
     kinds = {r["kind"] for r in md.stations_at(synthetic, pd.Timestamp("2013-04-05 02:00"))}
     assert kinds == {"modelled"}
