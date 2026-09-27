@@ -29,7 +29,7 @@ series, and see the geometry the run was built with drawn on top.
 | rendering | frames rendered **on demand on the server**, swapped into a deck.gl `BitmapLayer` |
 | cell time series | read from a per-run **cache written offline** |
 | playback | the app's own server-side loop with a **client frame acknowledgement**, not `shiny_deckgl`'s timeline helpers |
-| change baseline | **nearest wet-at-start water level, clipped to the cell's bed** (continuous across the starting shoreline) |
+| change baseline | **the starting water level of the nearest wet-at-start cell** (continuous across the starting shoreline) |
 | gauge comparison | coloured **only on frames within 30 min of a gauge reading** (validate.py's pairing) |
 | out of scope | variant comparison, water depth and velocity, video export, subgrid-resolution extent |
 
@@ -125,18 +125,21 @@ for all six existing runs (~1.9 GB under the git-ignored `runs/`).
 starting shoreline:
 
 - cells **wet in the first frame**: `baseline = zs[0]`;
-- cells **dry in the first frame**: `baseline = max(zs[0] of the nearest
-  wet-at-start cell, zb)`, the nearest cell found with
-  `scipy.ndimage.distance_transform_edt(..., return_indices=True)` over the
-  active grid.
+- cells **dry in the first frame**: `baseline = zs[0]` of the nearest
+  wet-at-start cell, found with
+  `scipy.ndimage.distance_transform_edt(~wet0, return_indices=True)`.
 
-So a low-lying cell that floods shows how far the water rose relative to the
-water that reached it, not its depth. The step at the shoreline that a mixed
-"level rise / depth" baseline produced (median 0.16 m between neighbours with
-equal water level, April hour 400) disappears. A cell whose bed is above the
-nearby starting water shows its depth above its bed minimum, since `zb` is the
-subgrid minimum. The legend says "change from start (m) — relative to the
-starting water level nearby".
+A newly flooded cell therefore shows how far the water surface stands above the
+starting water that reached it — the same quantity as its wet-at-start
+neighbour — not its depth. Measured on April hours 400 and 500 (10 500 and
+12 978 shoreline neighbour pairs): the mixed "level rise / depth" baseline puts
+a step of median 0.16 m (p90 0.62 m) between neighbours whose water levels
+differ by 0.4 mm; this rule gives median 0.000 m (p90 0.04–0.06 m). **No clip to
+`zb`**: every newly wet cell at hour 400 has its bed minimum above the nearby
+starting level, so `max(nearest, zb)` would always pick `zb` and restore the
+step; and no newly wet cell ends up with a negative change without it. The
+legend says "change from start (m) — relative to the starting water level
+nearby".
 
 ### App modules
 
@@ -258,8 +261,8 @@ blocked, with "reading from the map file (~4 s)" shown meanwhile.
   - warp: a known LKS94 point lands on the right pixel; north is up; the image
     shape follows from the 176 m pixel rule;
   - `frame` for both quantities, and the baseline: two adjacent cells with equal
-    `zs`, one wet at start and one not, get equal `change`; a cell above the
-    starting water gets `zs − zb`;
+    `zs`, one wet at start and one not (its bed above the starting level), get
+    equal `change`;
   - NaN → transparent; ranges from the streamed histogram equal `np.percentile`
     within one bin;
   - `cell_series` from cache and from the slow path agree within 2 mm; clicks
