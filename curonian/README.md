@@ -8,9 +8,10 @@ variants pass their success criteria (see "Results: Xaver 2013" below). The Apri
 river inflow that has to leave through the same strait — and **the hindcast is a
 partial result**: four of its seven scored criteria are met. The three that are
 not — the delta filling ~3.6 days early (A2a), cresting late (A2b), and Rusnė
-rising 0.20 m too little (A6a) — are the signature of an ice jam on the lower
-Atmata that the model does not contain (see "Why the delta fills early: an
-unmodelled ice jam" below). The sea boundary is fitted to the daily Klaipėda
+rising 0.20 m too little (A6a) — have two causes. A2a and A6a are the signature
+of an ice jam on the lower Atmata that the model does not contain (see "Why the
+delta fills early: an unmodelled ice jam" below); A2b is not moved by the jam and
+more likely follows the timing of the sea boundary's crest. The sea boundary is fitted to the daily Klaipėda
 readings (see "Sea boundary: fitted to the daily Klaipeda readings") and the river
 inputs are the corrected Nemunas share and the measured Minija (see "River inputs:
 Nemunas share and measured Minija"); neither correction fixes the timing misses.
@@ -549,9 +550,9 @@ reading, not the timing between them).
   timing, and A6a, Rusnė's rise. A1, A3, A5 and A6b are met. A4 is an info line
   (see "Sea boundary: fitted to the daily Klaipeda readings"). Before the
   river-input corrections five of seven were met (A6a passed at −0.11 m); before
-  the fitted boundary four of eight, with A3 and A4 also failing. All three misses
-  point to one thing the model does not contain: an ice jam on the lower Atmata
-  (see "Why the delta fills early: an unmodelled ice jam" below).
+  the fitted boundary four of eight, with A3 and A4 also failing. A2a and A6a point
+  to one thing the model does not contain, an ice jam on the lower Atmata; A2b does
+  not (see "Why the delta fills early: an unmodelled ice jam" below).
 - **A6 checks the freshet at Rusnė, in the delta itself**, against LHMT's daily
   Atmata level (`inputs/april_2013/lhmt_rusne.csv`; © LHMT, CC BY-SA 4.0). That
   gauge's zero is not known in the model datum (it sits ~2 m from the 500 cm
@@ -614,7 +615,8 @@ reading, not the timing between them).
   boundary, 103 h before the bed fix): the delta fills ~3.6 days too soon, then
   crests after the observed plateau (A2b, model peak 2013-04-25 00:10 against an
   observed 22–24 Apr plateau). Neither the sea boundary nor the river inputs move
-  A2a by more than 9 h; the ice-jam experiments below do.
+  A2a by more than 9 h; the ice-jam experiments below do. None of them moves A2b,
+  whose crest sits on the sea boundary's crest instead (see the Conclusion there).
 - **A3 was met until 2026-09-17, and its passing was an artefact.** It read
   −0.13 m while Uostadvaris was sampled 3.6 km down-delta of its gauge, where the
   modelled level is about 0.40 m lower. Two errors were cancelling: an over-built
@@ -715,11 +717,19 @@ gate):
 
 None of the three moves A2b: Uostadvaris still crests on 25 Apr.
 
-**Conclusion.** The April delta-timing misses (A2a, A2b) and Rusnė's missing rise
-(A6a) are the signature of an unmodelled ice jam on the lower Atmata that built up
-gradually and gave way over ~18–22 April. Neither input correction fixes them, and
-only a blockage reproduces both the Rusnė and the Uostadvaris signatures. That
-makes them a limitation of what the model is given, not a defect in it. **The jam
+**Conclusion.** The early delta fill (A2a) and Rusnė's missing rise (A6a) are the
+signature of an unmodelled ice jam on the lower Atmata that built up gradually and
+gave way over ~18–22 April. Neither input correction fixes them, and only a
+blockage reproduces both the Rusnė and the Uostadvaris signatures.
+
+**A2b is not explained by the jam.** No experiment moves the Uostadvaris crest
+(25 Apr 00:10–00:20 in every run). It sits on the sea boundary's crest instead —
+`inputs/april_2013/forcing_summary.txt`: "crest peak 0.16 m at 2013-04-25 01:00",
+19 h after the Klaipėda gauge's observed peak (24 Apr 06:00). Between two daily
+06:00 readings the fitted boundary keeps GTSM's shape, so a sea crest GTSM places
+late would carry the delta crest with it. That is a lead, not a result: it is
+untested, and hourly Klaipėda data for April 2013 would settle it. That
+makes A2a and A6a a limitation of what the model is given, not a defect in it. **The jam
 is not built into the published model**: there is no observation of when it formed
 or released, and fitting a gate's timing to one gauge would be curve-fitting. The
 experiments are kept as the evidence.
