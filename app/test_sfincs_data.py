@@ -29,7 +29,7 @@ def test_criteria_are_parsed_with_verdicts():
     assert [c["label"] for c in items][:4] == [
         "C1 Uostadvaris peak",
         "C2 Nida 8 Dec rise",
-        "C3 Klaipeda RMSE",
+        "C3 Klaipeda boundary fit",
         "C4 Silute uplands",
     ]
     assert all(c["verdict"] and c["detail"] for c in items)
@@ -39,8 +39,9 @@ def test_info_lines_are_kept_but_not_scored():
     verdicts = [c["verdict"] for c in sd.criteria(VARIANT)]
     assert "info" in verdicts
     _, sentence = viewer.headline(VARIANT)
-    # the two info lines must not inflate the denominator
-    assert sentence.startswith("4 of 4")
+    # the info lines (the two 8 Dec 06:00 checks, and C3 since the sea boundary
+    # is fitted to the Klaipeda readings) must not inflate the denominator
+    assert sentence.startswith("3 of 3")
 
 
 def test_marginal_pass_is_reported_but_flagged(monkeypatch):
@@ -82,7 +83,7 @@ def test_unscored_verdicts_leave_the_denominator(monkeypatch):
 
 
 def test_flooded_area_is_read_from_the_report():
-    assert sd.flooded_area_km2(VARIANT) == pytest.approx(155.6)   # results/xaver_2013/validation.md since ad54760
+    assert sd.flooded_area_km2(VARIANT) == pytest.approx(158.4)   # results/xaver_2013/validation.md since the fitted sea boundary
 
 
 def test_both_metric_tables_are_parsed():
