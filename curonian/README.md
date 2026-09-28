@@ -6,12 +6,14 @@ pushes water into the lagoon through the Klaipeda strait; all three of its forci
 variants pass their success criteria (see "Results: Xaver 2013" below). The April
 2013 Nemunas freshet (5 Apr – 2 May 2013) is the opposite driver — a slow, large
 river inflow that has to leave through the same strait — and **the hindcast is a
-partial result**: five of its seven scored criteria are met, and the two that are
-not (A2a, A2b) are both on timing. Since the sea boundary was fitted to the daily
-Klaipėda readings (see "Sea boundary: fitted to the daily Klaipeda readings"
-below) the sea end and the central lagoon are right; the error that remains is at
-the river end — the eastern side 0.10–0.15 m high and the delta filling ~4 days
-early (see "Results: April 2013" below).
+partial result**: four of its seven scored criteria are met. The three that are
+not — the delta filling ~3.6 days early (A2a), cresting late (A2b), and Rusnė
+rising 0.20 m too little (A6a) — are the signature of an ice jam on the lower
+Atmata that the model does not contain (see "Why the delta fills early: an
+unmodelled ice jam" below). The sea boundary is fitted to the daily Klaipėda
+readings (see "Sea boundary: fitted to the daily Klaipeda readings") and the river
+inputs are the corrected Nemunas share and the measured Minija (see "River inputs:
+Nemunas share and measured Minija"); neither correction fixes the timing misses.
 Design: `../docs/superpowers/specs/2026-09-04-curonian-lagoon-xaver-model-design.md`
 (Xaver) and `../docs/superpowers/specs/2026-09-16-april-2013-nemunas-flood-design.md`
 (April).
@@ -121,11 +123,18 @@ but a click reads `sfincs_map.nc` directly (~4 s).
   threads each, not the 16-thread single-run figure; mean dt 3.517 s in both,
   unchanged from the baseline. No `error`/`nan` in either log; `sfincs_his.nc`
   finite throughout. See "Sensitivity: gridded ERA5 wind and pressure (April)".
-- 2026-09-28: all six runs (three Xaver, three April) re-run on the fitted sea
+- 2026-09-28 (morning): all six runs (three Xaver, three April) re-run on the fitted sea
   boundary (see "Sea boundary: fitted to the daily Klaipeda readings"), 01:12–05:54,
   one after another on 12 threads each (a TELEMAC job held 16 cores). SFINCS total
   time 3218–3350 s for the April runs, 1609–1747 s for Xaver; mean dt unchanged
   (~3.51 s April). All six map caches re-exported with `prep.export_map_cache`.
+- 2026-09-28 (afternoon): all six runs re-run again on the corrected river inputs
+  (see "River inputs: Nemunas share and measured Minija"; code commit 9ace515,
+  results commit 99f446c), 12:50–17:17 on 16 threads. SFINCS total time
+  2790–3026 s for the April runs, 1496–2460 s for Xaver (the last Xaver run
+  overlapped other load). All six map caches re-exported. Three diagnostic April
+  runs were made alongside and kept in `results/experiments/` (not listed by the
+  viewer): see "Why the delta fills early: an unmodelled ice jam".
 
 ## Sea boundary: fitted to the daily Klaipeda readings
 
@@ -186,14 +195,63 @@ delta end of the head.
 If hourly EPA data for 2013 is ever obtained, it should replace this fit, and C3
 and A4 would become independent tests again.
 
+## River inputs: Nemunas share and measured Minija
+
+Two corrections to the river inflows, commit 9ace515; all six runs were re-run on
+them on the afternoon of 2026-09-28.
+
+**Nemunas: 0.896 × Smalininkai, not 1.00 ×.** The model injected the Smalininkai
+discharge unchanged at the Rusnė apex. It now injects
+`common.NEMUNAS_DELTA_FACTOR = 1.12 × 0.80 = 0.896` times it:
+
+- × 1.12 for the tributaries that join below Smalininkai (Šešupė, Jūra, Šešuvis);
+- × 0.80 because about 20 % of the Nemunas leaves through the Gilija/Matrosovka
+  before Rusnė — Zemlys et al. 2013 (124 of 624 m³/s); Valiuškevičius et al. 2019,
+  Baltica 31(2), doi 10.5200/baltica.2018.31.09: "About 80% of the annual runoff
+  of the Nemunas River flows through the right distributaries".
+
+It is the same transformation the sibling SHYFEM project documents
+(`~/curonian/etl/03_river_forcing_export.py`). Before, the delta received about
+12 % too much water.
+
+**Minija: measured at Lankupiai, not a constant.** The Minija was an estimated
+constant (46 m³/s for Xaver, 83 m³/s for April) because a comment said the
+database record ended in 2011. That was stale once the LHMT API's Lankupiai
+2012–2014 record was loaded. The model now uses the measured daily discharge
+(`inputs/<event>/lhmt_lankupiai.csv`; © LHMT, CC BY-SA 4.0) with no lag or
+scaling, since the gauge is ~10 km above the mouth. In April the measured flow was
+14–20 m³/s on 5–11 April (the constant ran about 5× too high), 84 → 144 → 129 m³/s
+on 13–15 April and 35–50 m³/s in late April; for Xaver it is 45–105 m³/s.
+
+**Kept: the 1-day Nemunas lag.** It was checked against the sibling project's
+fitted travel time, 24.822 + 4879.7/Q hours (27 h at 2000 m³/s, 35 h at 500 m³/s),
+and left as it is.
+
+As run (`inputs/<event>/forcing_summary.txt`): Nemunas at Rusnė 314–585 m³/s for
+Xaver and 358–1926 m³/s for April; Minija 45–105 and 14–144 m³/s.
+
+On its own (Run A, `results/experiments/april_2013_riverfix/`) the correction took
+382 Mm³ out of the delta over the April run — 310 Mm³ from the Nemunas, 72 Mm³ from
+the Minija. It lowered the April levels (A1 +0.13 → +0.07 m, A3 +0.09 → +0.02 m,
+Uostadvaris scoring-window bias +0.16 → +0.09 m) but barely the timing (A2a −96 →
+−87 h, still not met; A2b still not met), and
+Rusnė now rises too little (A6a −0.20 m, not met); see "Why the delta fills early:
+an unmodelled ice jam". Xaver moved by at most 0.01 m in any error.
+
 ## Results: Xaver 2013
 
-> **Re-run on 2026-09-28 on the fitted sea boundary** (see the section above). The
-> figures below are from that run; C3 is now an info line, so C1, C2 and C4 are the
-> scored criteria, and all three are met in all three variants. Against the
-> static-offset run the C2 error went from −0.04 to −0.01 m, the 8 Dec 06:00 miss
-> at Uostadvaris/Nida from −0.11/−0.14 to −0.09/−0.12 m, and flooded area from 155.6
-> to 158.4 km².
+> **Re-run on the afternoon of 2026-09-28 on the corrected river inputs** (see
+> "River inputs: Nemunas share and measured Minija"). The figures below are from
+> that run. C1, C2 and C4 stay met in all three variants and every error moved by
+> at most 0.01 m: C1 +0.08 → +0.07 m, C2 −0.01 → −0.02 m, the 8 Dec 06:00 miss at
+> Uostadvaris/Nida −0.09/−0.12 → −0.10/−0.13 m; flooded area 158.4 → 157.1 km².
+>
+> **Re-run on the morning of 2026-09-28 on the fitted sea boundary** (see "Sea
+> boundary: fitted to the daily Klaipeda readings"). C3 became an info line, so C1,
+> C2 and C4 are the scored criteria. Against the static-offset run the C2 error went
+> from −0.04 to −0.01 m, the 8 Dec 06:00 miss at Uostadvaris/Nida from −0.11/−0.14
+> to −0.09/−0.12 m, and flooded area from 155.6 to 158.4 km² (all before the
+> river-input corrections).
 >
 > **Re-run three times on 2026-09-17**, each time after the April hindcast exposed
 > a defect in the shared geometry: first a bathymetry bar at datum across the
@@ -201,8 +259,8 @@ and A4 would become independent tests again.
 > observation point, 3.6 km from its LHMT gauge; then the Nemunas distributaries
 > burned to a first-estimate constant instead of their surveyed bed. All are
 > described under **Results: April 2013**. Xaver's *forcing* is unchanged
-> throughout: its Jul–Dec 2013 Smalininkai block agrees with LHMT exactly, so no
-> discharge fix touched it.
+> through those re-runs: its Jul–Dec 2013 Smalininkai block agrees with LHMT exactly, so no
+> discharge fix touched it (the river-input corrections of 2026-09-28 came later).
 > **C1–C4 remain met in all three variants**, so the published Xaver claim does
 > not depend on any of the broken geometry; the surge pushes water *into* the
 > lagoon, which is far less sensitive to outflow capacity than a freshet. The
@@ -214,7 +272,7 @@ and A4 would become independent tests again.
 > +0.07 m in the baseline and from +0.01 to −0.01 m with gridded wind
 > (and likewise +0.01 to −0.01 m with pressure), the 8 Dec 06:00 Uostadvaris miss widened by
 > 0.02 m, and flooded area fell 1–2 km² (all before the fitted boundary). The
-> figures below are from the 2026-09-28 re-run, not these.
+> figures below are from the afternoon 2026-09-28 re-run, not these.
 
 Full validation output: `results/xaver_2013/validation.md`,
 `results/xaver_2013/validation_timeseries.png` (time series) and
@@ -229,35 +287,36 @@ Whole period: 2013-11-28 00:00 to 2013-12-11 00:00
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 13 | +0.00 | 0.01 | 1.00 | +0.15 | +9 |
-| Nida | 26 | -0.00 | 0.07 | 0.88 | +0.02 | +2 |
-| Vente | 26 | +0.06 | 0.10 | 0.80 | +0.11 | +2 |
-| Uostadvaris | 13 | +0.00 | 0.05 | 0.93 | +0.08 | +0 |
+| Nida | 26 | -0.01 | 0.07 | 0.88 | +0.02 | +2 |
+| Vente | 26 | +0.05 | 0.10 | 0.79 | +0.10 | +2 |
+| Uostadvaris | 13 | -0.01 | 0.06 | 0.92 | +0.07 | +0 |
 
 Storm window: 2013-12-05 00:00 to 2013-12-09 00:00
 
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 4 | +0.01 | 0.01 | 1.00 | +0.15 | +9 |
-| Nida | 8 | -0.06 | 0.12 | 0.79 | -0.01 | +0 |
-| Vente | 8 | +0.03 | 0.12 | 0.73 | +0.08 | -67 |
-| Uostadvaris | 4 | -0.02 | 0.08 | 0.90 | +0.08 | +0 |
+| Nida | 8 | -0.07 | 0.12 | 0.79 | -0.02 | +0 |
+| Vente | 8 | +0.02 | 0.12 | 0.73 | +0.08 | -67 |
+| Uostadvaris | 4 | -0.03 | 0.08 | 0.90 | +0.07 | +0 |
 
-Flooded land in the delta window (depth > 5 cm, ground > 0 m): **158.4 km²**
+Flooded land in the delta window (depth > 5 cm, ground > 0 m): **157.1 km²**
 
 ### Success criteria (spec section 9)
-- C1 Uostadvaris peak [2013-12-05 00:00 to 2013-12-09 00:00]: **met** -- model peak 2013-12-06 06:20, peak err +0.08 m, dt +0.3 h (threshold: peak err within +/-0.15 m and |dt| <= 6 h)
-- C2 Nida 8 Dec rise [2013-12-07 06:00 to 2013-12-08 18:00]: **met** -- model 0.41 m -> 0.83 m vs gauge 0.84 m, err -0.01 m, rise reproduced (threshold: err within +/-0.15 m (<=0.10 m for a clean 'met'), rise reproduced in sign)
+- C1 Uostadvaris peak [2013-12-05 00:00 to 2013-12-09 00:00]: **met** -- model peak 2013-12-06 06:20, peak err +0.07 m, dt +0.3 h (threshold: peak err within +/-0.15 m and |dt| <= 6 h)
+- C2 Nida 8 Dec rise [2013-12-07 06:00 to 2013-12-08 18:00]: **met** -- model 0.40 m -> 0.82 m vs gauge 0.84 m, err -0.02 m, rise reproduced (threshold: err within +/-0.15 m (<=0.10 m for a clean 'met'), rise reproduced in sign)
 - C3 Klaipeda boundary fit [2013-12-05 00:00 to 2013-12-09 00:00]: **info** -- storm RMSE 0.01 m (whole-period RMSE 0.01 m) (threshold: n/a -- the sea boundary is fitted to these readings; not an independent test)
 - C4 Silute uplands [delta window (325000, 6105000, 360000, 6145000)]: **met** -- 0.00% of land with ground > 3 m flooded (threshold: < 1 % flooded)
-- Info: Uostadvaris 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.74 m vs gauge 0.83 m, err -0.09 m (threshold: n/a (context only))
-- Info: Nida 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.62 m vs gauge 0.74 m, err -0.12 m (threshold: n/a (context only))
+- Info: Uostadvaris 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.73 m vs gauge 0.83 m, err -0.10 m (threshold: n/a (context only))
+- Info: Nida 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.61 m vs gauge 0.74 m, err -0.13 m (threshold: n/a (context only))
 
 Forcing as run (`inputs/xaver_2013/forcing_summary.txt`): GTSM corrected by 15
 Klaipeda 06:00 readings, residual −0.034 to +0.247 m (mean +0.110), largest gap
 24 h; boundary level 0.40 m at the start, storm peak 1.02 m at 2013-12-06 16:00;
 Klaipeda 06:00 gauge peak 0.88 m at 2013-12-06 06:00; wind peak 19.5 m/s at
-2013-12-06 06:00 from 236°; Nemunas discharge 351–653 m³/s, Minija held constant
-at 46.0 m³/s. The fitted boundary, the gauge and the wind all peak on 6 December.
+2013-12-06 06:00 from 236°; Nemunas at Rusnė (0.896 × Smalininkai) 314–585 m³/s,
+Minija (measured at Lankupiai) 45–105 m³/s. The fitted boundary, the gauge and the
+wind all peak on 6 December.
 
 ### Findings
 
@@ -276,11 +335,11 @@ at 46.0 m³/s. The fitted boundary, the gauge and the wind all peak on 6 Decembe
   confirm or rule out — high-frequency energy carried in on the GTSM boundary,
   which the daily fit does not remove.
 - Uostadvaris peak: model peak at 06:20 on 6 Dec against the gauge's 0.92 m at
-  06:00 — peak error +0.08 m at +0.3 h, inside the ±0.15 m / ±6 h target
+  06:00 — peak error +0.07 m at +0.3 h, inside the ±0.15 m / ±6 h target
   (C1: met). Sampled at the gauge's own coordinate since 2026-09-17; the
-  whole-period bias there is +0.00 m at RMSE 0.05 m, r 0.93.
-- Nida delayed rise: the model rises from 0.41 m to 0.83 m across 7–8 December
-  against the gauge's peak of 0.84 m, a miss of −0.01 m with the rise reproduced
+  whole-period bias there is −0.01 m at RMSE 0.06 m, r 0.92.
+- Nida delayed rise: the model rises from 0.40 m to 0.82 m across 7–8 December
+  against the gauge's peak of 0.84 m, a miss of −0.02 m with the rise reproduced
   in sign — a clean C2 "met" (−0.04 m before the fitted boundary). Before the
   geometry fixes the same comparison read 0.46 m → 0.71 m for a −0.13 m miss,
   which passed only marginally. The whole-period peak error is +0.02 m at +2 h,
@@ -290,23 +349,25 @@ at 46.0 m³/s. The fitted boundary, the gauge and the wind all peak on 6 Decembe
   Juodkrante, Rusne and Silute all had to be moved 0.2–1.2 km into wet cells to
   get a usable point series (see Run log).
 - The second rise is missed at both gauges, not just Nida: at 8 Dec 06:00
-  the model is −0.09 m low at Uostadvaris (0.74 m vs gauge 0.83 m) and
-  −0.12 m low at Nida (0.62 m vs gauge 0.74 m) — almost the same miss at two
+  the model is −0.10 m low at Uostadvaris (0.73 m vs gauge 0.83 m) and
+  −0.13 m low at Nida (0.61 m vs gauge 0.74 m) — almost the same miss at two
   gauges roughly 60 km apart, so it is systematic rather than an artefact of
   moving the Nida station off its spec position. Two candidates have now been
   tested and neither explains it. Wind: the gridded ERA5 runs (see "Sensitivity:
   gridded ERA5 wind and pressure" below) reduce it to −0.08/−0.09 m. The daily
   level of the sea boundary: fitting it to the Klaipeda readings moved the miss
-  only from −0.11/−0.14 m to −0.09/−0.12 m. What is left untested is the sea
+  only from −0.11/−0.14 m to −0.09/−0.12 m (before the river-input corrections,
+  which added 0.01 m to each). What is left untested is the sea
   boundary's shape *between* readings, which once-daily readings cannot
   constrain.
-- Vente: the whole-period peak error is +0.11 m at +2 h, so the model and gauge
+- Vente: the whole-period peak error is +0.10 m at +2 h, so the model and gauge
   maxima still fall within hours of each other. RMSE 0.10 m over the whole period,
   0.12 m in the storm window. (Before the fitted boundary, at matching 06:00
   readings on 6 Dec the model overshot the setup peak by about 0.21 m — 0.81 m
   modelled vs 0.60 m gauge — and tracked the gauge well afterwards.)
-- Flooded area: 158.4 km² of land floods in the delta window (depth > 5 cm,
-  ground > 0 m only; 155.6 km² before the fitted boundary). This is a lower bound
+- Flooded area: 157.1 km² of land floods in the delta window (depth > 5 cm,
+  ground > 0 m only; 158.4 km² before the river-input corrections, 155.6 km²
+  before the fitted boundary). This is a lower bound
   on inundation extent — cells at or below 0 m ground are excluded — but likely
   an overestimate of real flooding, since the model has no drainage or pumping,
   the modelled whole-period peak error at Klaipeda is +0.15 m even though the mean
@@ -325,9 +386,10 @@ at 46.0 m³/s. The fitted boundary, the gauge and the wind all peak on 6 Decembe
   and pressure"): it cut flooded area by about 17 % but left the 8 Dec 06:00 miss
   nearly unchanged, so a uniform vs. gridded wind field is not the main driver of
   that miss; (3) the 500 cm gauge-zero assumption looks right as it stands —
-  whole-period bias is within ±6 cm at the three gauges not fitted to (Klaipeda's
-  +0.00 m is now by construction); (4) channel dimensions and the Minija constant
-  discharge — this event gives no evidence either way.
+  whole-period bias is within ±5 cm at the three gauges not fitted to (Klaipeda's
+  +0.00 m is now by construction); (4) channel dimensions — this event gives no
+  evidence either way. (The Minija is no longer an assumption: it is the measured
+  Lankupiai discharge; see "River inputs: Nemunas share and measured Minija".)
 
 ## Sensitivity: gridded ERA5 wind and pressure
 
@@ -379,9 +441,9 @@ are the C1 line's, which carries one more decimal than the table).
 
 | run | Vente storm peak err m | Uostadvaris peak err m | Uostadvaris peak dt h | Nida C2 err m (verdict) | Uostadvaris 8 Dec 06:00 err m | Nida 8 Dec 06:00 err m | C3 Klaipeda fit storm RMSE m (info) | flooded area km² | C1 | C2 | C3 | C4 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| baseline (uniform wind) | +0.08 | +0.08 | +0.3 | -0.01 (met) | -0.09 | -0.12 | 0.01 | 158.4 | met | met | info | met |
-| gridded wind | +0.08 | +0.01 | +0.2 | -0.02 (met) | -0.08 | -0.09 | 0.01 | 131.7 | met | met | info | met |
-| gridded wind + pressure | +0.07 | +0.01 | +0.3 | -0.03 (met) | -0.08 | -0.10 | 0.01 | 131.3 | met | met | info | met |
+| baseline (uniform wind) | +0.08 | +0.07 | +0.3 | -0.02 (met) | -0.10 | -0.13 | 0.01 | 157.1 | met | met | info | met |
+| gridded wind | +0.07 | -0.00 | +0.3 | -0.02 (met) | -0.08 | -0.09 | 0.01 | 130.7 | met | met | info | met |
+| gridded wind + pressure | +0.06 | -0.00 | +0.3 | -0.03 (met) | -0.09 | -0.10 | 0.01 | 130.2 | met | met | info | met |
 
 Full validation output: `results/xaver_2013_gridwind/validation.md`,
 `results/xaver_2013_gridwind_pressure/validation.md`, and each run's own
@@ -390,24 +452,26 @@ Full validation output: `results/xaver_2013_gridwind/validation.md`,
 
 ### Interpretation
 
-All figures here are from the 2026-09-28 re-run on the fitted sea boundary. The
-sensitivity conclusion is the same as on the static-offset runs, with one
-exception: the Ventė overshoot.
+All figures here are from the afternoon 2026-09-28 re-run, on the fitted sea
+boundary and the corrected river inputs. The sensitivity conclusion is the same as
+on the static-offset runs, with one exception: the Ventė overshoot.
 
-The Ventė storm-window peak error no longer narrows with gridded wind: +0.08 m in
-the baseline, +0.08 m with gridded wind, +0.07 m with pressure added. On the
-static-offset runs it read +0.07, +0.04 and +0.03 m. That narrowing did not
-survive the boundary change, so it should not be read as a wind effect.
+The Ventė storm-window peak error barely narrows with gridded wind: +0.08 m in the
+baseline, +0.07 m with gridded wind, +0.06 m with pressure added — steps of 0.01 m,
+the same size as the river-input correction moved it (+0.08, +0.08, +0.07 m before
+it). On the static-offset runs it read +0.07, +0.04 and +0.03 m. That narrowing did
+not survive the boundary change, so it should not be read as a wind effect.
 
 The systematic 8 December second-rise underestimate is still present and still
-largely unexplained by wind: −0.09/−0.12 m (Uostadvaris/Nida) in the baseline,
-−0.08/−0.09 m with gridded wind and −0.08/−0.10 m with pressure. The geometry fix
-took the baseline from −0.23/−0.22 m to −0.11/−0.14 m, and the fitted boundary a
-further 0.02 m off each; neither wind nor the daily boundary level accounts for
-the rest (see Findings above).
+largely unexplained by wind: −0.10/−0.13 m (Uostadvaris/Nida) in the baseline,
+−0.08/−0.09 m with gridded wind and −0.09/−0.10 m with pressure. The geometry fix
+took the baseline from −0.23/−0.22 m to −0.11/−0.14 m, the fitted boundary a
+further 0.02 m off each, and the river-input correction put 0.01 m back on each;
+neither wind nor the daily boundary level accounts for the rest (see Findings
+above).
 
 C3 is now an info line: Klaipėda storm RMSE 0.01 m in all three runs, because the
-boundary is fitted to those readings. The Nida C2 rise error is −0.01 to −0.03 m,
+boundary is fitted to those readings. The Nida C2 rise error is −0.02 to −0.03 m,
 a clean "met" in every variant. Adding pressure on top of gridded wind still moves
 every number by at most 0.02 m or 0.5 km², consistent with `pavbnd = 0` keeping
 the pressure effect local.
@@ -420,8 +484,9 @@ later peak on 8 December) and which one `skill()`'s tie-break lands on shifts
 with small changes in the series. Nida reads +0 h in all three. Read Ventė's
 figure as an artefact of the tie-break, not a timing error.
 
-The flooded-area drop with gridded forcing persists (158.4 km² → 131.7 and
-131.3 km², about 17 %; 155.6 → 128.8 and 128.3 km² before the fitted boundary),
+The flooded-area drop with gridded forcing persists (157.1 km² → 130.7 and
+130.2 km², about 17 %; 158.4 → 131.7 and 131.3 km² before the river-input
+corrections, 155.6 → 128.8 and 128.3 km² before the fitted boundary),
 consistent with the ERA5 grid's wind over the delta being weaker or differently
 oriented than the Nida point value the baseline applies everywhere. That
 mechanism was not isolated further and should be read as plausible, not
@@ -442,82 +507,90 @@ Whole period: 2013-04-05 00:00 to 2013-05-02 00:00
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 27 | +0.00 | 0.00 | 1.00 | +0.02 | +19 |
-| Nida | 54 | -0.05 | 0.07 | 0.98 | -0.03 | -58 |
-| Vente | 54 | +0.08 | 0.10 | 0.97 | +0.12 | -6 |
-| Uostadvaris | 27 | +0.12 | 0.16 | 0.94 | +0.13 | +18 |
+| Nida | 54 | -0.08 | 0.09 | 0.98 | -0.08 | -58 |
+| Vente | 54 | +0.06 | 0.07 | 0.97 | +0.07 | -6 |
+| Uostadvaris | 27 | +0.07 | 0.11 | 0.94 | +0.07 | +18 |
 
 Scoring window: 2013-04-13 00:00 to 2013-05-02 00:00
 
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 19 | +0.00 | 0.00 | 1.00 | +0.02 | +19 |
-| Nida | 38 | -0.02 | 0.04 | 0.98 | -0.03 | -58 |
-| Vente | 38 | +0.10 | 0.11 | 0.97 | +0.12 | -6 |
-| Uostadvaris | 19 | +0.16 | 0.18 | 0.90 | +0.13 | +18 |
+| Nida | 38 | -0.06 | 0.07 | 0.98 | -0.08 | -58 |
+| Vente | 38 | +0.07 | 0.08 | 0.97 | +0.07 | -6 |
+| Uostadvaris | 19 | +0.09 | 0.13 | 0.90 | +0.07 | +18 |
 
-Flooded land in the delta window (depth > 5 cm, ground > 0 m): **73.3 km²**
+Flooded land in the delta window (depth > 5 cm, ground > 0 m): **63.5 km²**
 
 ### Success criteria (spec section 9)
-- A1 Uostadvaris peak [2013-04-13 00:00 to 2013-05-02 00:00]: **met** -- model peak 0.67 m vs gauge 0.54 m, err +0.13 m (threshold: peak err within +/-0.15 m)
-- A2a filling rate [first crossing of +0.20 m]: **not met** -- model 2013-04-15 08:20 vs gauge (interpolated) 2013-04-19 08:00, dt -96 h (threshold: within +/-24 h of the observed crossing)
-- A2b crest timing [2013-04-21 18:00 to 2013-04-24 18:00]: **not met** -- model peak 2013-04-25 00:20; observed plateau 22 Apr-24 Apr (threshold: model peak inside the observed plateau +/-12 h)
-- A3 delta-to-sea head [2013-04-22 00:00 to 2013-04-26 00:00]: **met** -- model 0.56 m vs gauge 0.48 m over 5 readings, err +0.09 m (threshold: mean head within +/-0.15 m)
+- A1 Uostadvaris peak [2013-04-13 00:00 to 2013-05-02 00:00]: **met** -- model peak 0.61 m vs gauge 0.54 m, err +0.07 m (threshold: peak err within +/-0.15 m)
+- A2a filling rate [first crossing of +0.20 m]: **not met** -- model 2013-04-15 17:00 vs gauge (interpolated) 2013-04-19 08:00, dt -87 h (threshold: within +/-24 h of the observed crossing)
+- A2b crest timing [2013-04-21 18:00 to 2013-04-24 18:00]: **not met** -- model peak 2013-04-25 00:10; observed plateau 22 Apr-24 Apr (threshold: model peak inside the observed plateau +/-12 h)
+- A3 delta-to-sea head [2013-04-22 00:00 to 2013-04-26 00:00]: **met** -- model 0.50 m vs gauge 0.48 m over 5 readings, err +0.02 m (threshold: mean head within +/-0.15 m)
 - A4 Klaipeda boundary fit [2013-04-13 00:00 to 2013-05-02 00:00]: **info** -- RMSE 0.002 m against an observed sd of 0.089 m (threshold: n/a -- the sea boundary is fitted to these readings; not an independent test)
 - A5 Silute uplands [whole run, delta window (325000, 6105000, 360000, 6145000)]: **met** -- 0.00% of land with ground > 3 m flooded (threshold: < 1 % flooded)
-- A6a Rusne rise [2013-04-13 00:00 to 2013-05-02 00:00]: **met** -- model 1.42 m vs gauge 1.53 m above the 05-11 Apr mean, err -0.11 m (daily values; gauge zero unknown, rise only) (threshold: rise within +/-0.15 m)
+- A6a Rusne rise [2013-04-13 00:00 to 2013-05-02 00:00]: **not met** -- model 1.33 m vs gauge 1.53 m above the 05-11 Apr mean, err -0.20 m (daily values; gauge zero unknown, rise only) (threshold: rise within +/-0.15 m)
 - A6b Rusne crest date [19 Apr to 24 Apr]: **met** -- model crest 21 Apr; observed plateau 20 Apr-23 Apr (threshold: model crest inside the observed plateau +/-1 day)
 
 Forcing as run (`inputs/april_2013/forcing_summary.txt`): GTSM corrected by 29
 Klaipeda 06:00 readings, residual −0.280 to +0.078 m (mean −0.100), largest gap
 24 h; boundary level −0.35 m at the start rising to a crest of 0.16 m at
 2013-04-25 01:00; Klaipeda 06:00 gauge peak 0.15 m at 2013-04-24 06:00; wind peak
-12.2 m/s at 2013-04-25 01:00 from 265°; Nemunas discharge 400–2150 m³/s, Minija
-held constant at 83.0 m³/s. The GTSM crest lands 19 h from the Klaipeda 06:00
-gauge peak — past the 12 h check tolerance, recorded as a FINDING per spec and not
-treated as a blocker (with only daily gauge readings, 19 h is inside the
-observation's own resolution; the fit sets the level at each reading, not the
-timing between them).
+12.2 m/s at 2013-04-25 01:00 from 265°; Nemunas at Rusnė (0.896 × Smalininkai)
+358–1926 m³/s, Minija (measured at Lankupiai) 14–144 m³/s. The GTSM crest lands
+19 h from the Klaipeda 06:00 gauge peak — past the 12 h check tolerance, recorded
+as a FINDING per spec and not treated as a blocker (with only daily gauge readings,
+19 h is inside the observation's own resolution; the fit sets the level at each
+reading, not the timing between them).
 
 ### Findings
 
-- **Two of the seven scored criteria are not met** — A2a and A2b, both on
-  timing. A1, A3, A5 and both Rusnė checks (A6a, A6b) are met. A4 is now an info
-  line (see "Sea boundary: fitted to the daily Klaipeda readings"). Before the
-  fitted boundary four of eight were met, with A3 and A4 also failing.
+- **Three of the seven scored criteria are not met** — A2a and A2b, both on
+  timing, and A6a, Rusnė's rise. A1, A3, A5 and A6b are met. A4 is an info line
+  (see "Sea boundary: fitted to the daily Klaipeda readings"). Before the
+  river-input corrections five of seven were met (A6a passed at −0.11 m); before
+  the fitted boundary four of eight, with A3 and A4 also failing. All three misses
+  point to one thing the model does not contain: an ice jam on the lower Atmata
+  (see "Why the delta fills early: an unmodelled ice jam" below).
 - **A6 checks the freshet at Rusnė, in the delta itself**, against LHMT's daily
   Atmata level (`inputs/april_2013/lhmt_rusne.csv`; © LHMT, CC BY-SA 4.0). That
   gauge's zero is not known in the model datum (it sits ~2 m from the 500 cm
   assumed for the lagoon gauges), so A6 scores only the rise above the 5–11 Apr
   calm-window mean and the crest date, never absolute level. The model's rise is
-  1.42 m against 1.53 m observed (−0.11 m) and its crest falls on 21 Apr inside
-  the observed 20–23 Apr plateau. Its rising limb runs one to two days ahead of
-  the gauge, the same early filling that A2a flags at Uostadvaris. The run itself is
+  1.33 m against 1.53 m observed (−0.20 m, not met; −0.11 m and met before the
+  river-input corrections, when the delta received about 12 % too much Nemunas).
+  Its crest falls on 21 Apr, inside the observed 20–23 Apr plateau. The model's
+  Rusnė starts rising on time, so the inflow timing is right, but it levels off by
+  17 Apr while the gauge keeps rising to its 21–22 Apr peak. The run itself is
   not in question: `sfincs.inp`'s `tstart`/`tstop` match the event, `sfincs_his.nc`
   is finite throughout, and the solver log is clean.
-- **The sea end and the central lagoon are now right; the error is at the river
-  end.** Over the scoring window, station bias before → after the fitted boundary:
+- **Levels are close; the timing is not.** Over the scoring window, station bias
+  through the two 2026-09-28 corrections:
 
-  | station | static offset | fitted boundary | RMSE (fitted) |
-  | --- | --- | --- | --- |
-  | Klaipėda (the sea) | −0.16 m | +0.00 m | 0.00 m (fitted to it) |
-  | Nida | −0.13 m | −0.02 m | 0.04 m |
-  | Ventė | −0.00 m | +0.10 m | 0.11 m |
-  | Uostadvaris (the delta) | +0.10 m | +0.16 m | 0.18 m |
+  | station | static offset | fitted boundary | + corrected river inputs | RMSE (now) |
+  | --- | --- | --- | --- | --- |
+  | Klaipėda (the sea) | −0.16 m | +0.00 m | +0.00 m | 0.00 m (fitted to it) |
+  | Nida | −0.13 m | −0.02 m | −0.06 m | 0.07 m |
+  | Ventė | −0.00 m | +0.10 m | +0.07 m | 0.08 m |
+  | Uostadvaris (the delta) | +0.10 m | +0.16 m | +0.09 m | 0.13 m |
 
-  Nida, mid-lagoon, now sits within 0.02 m of its gauge at r 0.98. The eastern
-  side — Ventė and Uostadvaris — stands 0.10–0.15 m high. The old near-perfect
-  Ventė (bias −0.00 m, RMSE 0.04 m) and A1 (+0.05 m) were partly compensating
-  errors: a sea end held too low pulling down a delta end that was too high. With
-  the sea end fixed, A1 is still met but at +0.13 m (peak 0.67 m vs gauge 0.54 m),
-  close to its ±0.15 m limit. Before the distributaries were given their surveyed
-  bed (see *The second cause* below) Uostadvaris read +0.22 m, RMSE 0.25 m and peak
-  error +0.16 m, and A1 failed.
-- **A3 is met, and now tests the delta end.** A3 scores the mean Uostadvaris −
+  With the sea end fitted, the eastern side — Ventė and Uostadvaris — stood
+  0.10–0.15 m high; taking the excess Nemunas and Minija water out brought it to
+  +0.07 and +0.09 m. Nida moved the other way, from −0.02 m to −0.06 m (r 0.98
+  throughout). The old near-perfect Ventė (bias −0.00 m, RMSE 0.04 m) and A1
+  (+0.05 m) on the static-offset run were partly compensating errors: a sea end
+  held too low pulling down a delta end that was too high. With the sea end fixed
+  A1 was met at +0.13 m, close to its ±0.15 m limit; with the river inputs
+  corrected it is +0.07 m (peak 0.61 m vs gauge 0.54 m). Before the distributaries
+  were given their surveyed bed (see *The second cause* below) Uostadvaris read
+  +0.22 m, RMSE 0.25 m and peak error +0.16 m, and A1 failed.
+- **A3 is met, and tests the delta end.** A3 scores the mean Uostadvaris −
   Klaipėda head, so its error is the difference of those two stations' biases.
-  With Klaipėda fitted to its readings, A3's +0.09 m (model 0.56 m vs gauge 0.48 m)
-  is the delta end's excess alone. It was +0.23 m on the static-offset run, and
-  the decomposition then (before the fitted boundary), over A3's crest window on
-  the five readings all four gauges share, was:
+  With Klaipėda fitted to its readings, A3's +0.02 m (model 0.50 m vs gauge 0.48 m)
+  is the delta end's excess alone; it was +0.09 m before the river-input
+  corrections and +0.23 m on the static-offset run. The decomposition then (before
+  the fitted boundary), over A3's crest window on the five readings all four
+  gauges share, was:
 
   | station | model − gauge | sd |
   | --- | --- | --- |
@@ -530,17 +603,18 @@ timing between them).
   strait and decaying inland — is what the fitted boundary confirmed: Klaipėda's
   bias went to +0.00 m and Nida's from −0.13 m to −0.02 m. Its other reading, that
   the delta stood within 2.4 cm of its gauge, did not survive: the delta was being
-  held down by the low sea, and with the sea right it stands high. Averaged over
+  held down by the low sea, and with the sea right it stood high. Averaged over
   the whole scoring window the decomposition then gave an Uostadvaris − Ventė
   excess head of +0.235 m before the bed fix and **+0.112 m** after it, and Ventė −
   Nida +0.124 m (all before the fitted boundary). Both tables come from
   `diag/head_decomposition.py`, which prints them for either event; they have not
-  been recomputed for the 2026-09-28 run.
-- **A2a is the residual.** Reaching +0.20 m at Uostadvaris 96 h early (89 h
-  before the fitted boundary, 103 h before the bed fix) is what the eastern side
-  standing high looks like on the time axis: the delta fills ~4 days too soon,
-  then crests after the observed plateau (A2b, model peak 2013-04-25 00:20 against
-  an observed 22–24 Apr plateau).
+  been recomputed for either 2026-09-28 re-run.
+- **A2a and A2b are the timing misses.** The model reaches +0.20 m at Uostadvaris
+  87 h early (96 h before the river-input corrections, 89 h before the fitted
+  boundary, 103 h before the bed fix): the delta fills ~3.6 days too soon, then
+  crests after the observed plateau (A2b, model peak 2013-04-25 00:10 against an
+  observed 22–24 Apr plateau). Neither the sea boundary nor the river inputs move
+  A2a by more than 9 h; the ice-jam experiments below do.
 - **A3 was met until 2026-09-17, and its passing was an artefact.** It read
   −0.13 m while Uostadvaris was sampled 3.6 km down-delta of its gauge, where the
   modelled level is about 0.40 m lower. Two errors were cancelling: an over-built
@@ -554,27 +628,101 @@ timing between them).
   moved through any of the geometry or data work — the cause was the boundary's
   static calm-window offset (spec section 10, limitation 5), which the fit
   replaces.
-- **Mass balance** (before the fitted boundary; not recomputed for the 2026-09-28
-  run). Over the 27-day run the two discharge points deliver 3.17 × 10⁹ m³. Spread
-  over the 1601 km² of lagoon the model actually resolves (`lagoon_boundary`
-  intersected with the active mask) that is a 1.98 m rise if nothing drained. The
-  area-weighted mean lagoon level went from −0.170 m at the start to a peak of
-  +0.205 m on 28 April — a rise of 0.375 m, so the model passed **81 % of the
-  freshet through the strait and held 19 %**. The observed lagoon peaked at 0.54 m
-  at Uostadvaris and had receded to 0.10 m by the end, so it passed essentially
-  all of it. Modelled flooded extent is now 73.3 km² (66.5 km² before the fitted
-  boundary, 81.0 km² before the bed fix). `diag/mass_balance.py` computes this,
-  definition included.
-- **Where to look next: the river end.** With the sea end fitted, what is left is
-  the eastern side 0.10–0.15 m high and the delta filling ~4 days early (A2a). Two
-  suspects: the timing of the Nemunas inflow (the 1-day lag applied to the
-  Smalininkai discharge, or the daily discharge series itself), and the delta's outflow
-  capacity — the burned distributary *widths* (200 m Atmata, 150 m Skirvytė, spec
-  section 4), Manning's n on the distributaries, and the storage a 100 m grid gives
-  a channel a few hundred metres wide. None of those have been touched. The sea
-  boundary's remaining weakness is sub-daily; for a slow freshet it matters less
-  than for Xaver, and only hourly Klaipėda data for 2013 could improve it (see "Sea
-  boundary: fitted to the daily Klaipeda readings").
+- **Mass balance** (before the fitted boundary and before the river-input
+  corrections; not recomputed since). Over the 27-day run the two discharge points
+  delivered 3.17 × 10⁹ m³. Spread over the 1601 km² of lagoon the model actually
+  resolves (`lagoon_boundary` intersected with the active mask) that is a 1.98 m
+  rise if nothing drained. The area-weighted mean lagoon level went from −0.170 m
+  at the start to a peak of +0.205 m on 28 April — a rise of 0.375 m, so the model
+  passed **81 % of the freshet through the strait and held 19 %**. The observed
+  lagoon peaked at 0.54 m at Uostadvaris and had receded to 0.10 m by the end, so
+  it passed essentially all of it. The river-input corrections alone took 382 Mm³
+  out of the delta over the run (see "River inputs: Nemunas share and measured
+  Minija"). Modelled flooded extent is now 63.5 km² (73.3 km² before the
+  river-input corrections, 66.5 km² before the fitted boundary, 81.0 km² before the
+  bed fix). `diag/mass_balance.py` computes this, definition included.
+- **Where to look next.** The river end is now accounted for: the inflow volume is
+  corrected, the inflow timing checks out (the model's Rusnė starts rising on time,
+  and the 1-day lag was checked against the sibling project's fitted travel time
+  and kept), and the
+  delta-timing misses and Rusnė's missing rise are the signature of an ice jam (see
+  the next section). Two leads remain. (1) Hourly EPA sea level for 2013 at
+  Klaipėda: the sea boundary's remaining weakness is sub-daily; for a slow freshet
+  it matters less than for Xaver, and only hourly data could improve it (see "Sea
+  boundary: fitted to the daily Klaipeda readings"). (2) An observation of the 2013
+  jam itself — when it formed and when it went — if one exists; with it, the
+  blockage in `results/experiments/` could be built in on evidence rather than
+  fitted. The burned distributary widths (200 m Atmata, 150 m Skirvytė, spec
+  section 4), Manning's n on the distributaries and grid storage are still
+  untouched, but they are no longer the suspects: they act all the time, not only
+  before 18 April.
+
+### Why the delta fills early: an unmodelled ice jam
+
+**What the gauges show** (daily readings). The Nemunas at Smalininkai rises from
+699 m³/s on 12 Apr to 1660 m³/s on 15 Apr and 2150 m³/s on 19 Apr. Rusnė, on the
+Atmata, rises from 13 Apr at a steady ~0.2 m/day to a peak on 21–22 Apr.
+Uostadvaris, at the Atmata mouth ~10 km downstream on the same channel, stays flat
+(−0.13 to +0.09 m) until 18 Apr, then jumps from 0.09 m to 0.37 m over 18–20 Apr.
+Ventė and Nida rise from 18–21 Apr. So for five days the water rose at Rusnė and
+did not arrive at the mouth.
+
+**What the model does.** Its Rusnė starts rising on time, so the inflow timing is
+right, but it levels off by 17 Apr. Uostadvaris, Ventė and Nida rise from
+13–15 Apr, about 4 days early. With nothing between Rusnė and the mouth, the model
+passes the freshet straight through.
+
+**Ice.** Uostadvaris's water temperature reads exactly 0.0 °C every day until
+12 Apr, then 3.5 °C on 13 Apr — ice at the Atmata mouth — while Nida and Ventė warm
+from ~6–10 Apr. Copernicus sea-ice shows the lagoon clear from ~4 Apr, but its grid
+is too coarse for the delta channels. Ice jams were observed "almost every second
+year near Rusne during the period 1970-1989" (Vaikasas 2005, cited in Valiuškevičius
+et al. 2019), who also note that the gauges capture only a fraction of jams. No
+report of a 2013 jam was found.
+
+**Three experiments**, kept in `results/experiments/` with their validation
+reports and, for the blocked runs, `sfincs.thd` (the dam) and `sfincs.drn` (the
+gate):
+
+- **Run A** (`april_2013_riverfix`): the corrected river inputs, no blockage. Its
+  verdicts and every scored value match the new baseline's; the tables differ in
+  one cell (Uostadvaris whole-period RMSE 0.12 vs 0.11 m) and the A2a crossing by
+  10 min (16:50 vs 17:00).
+- **Run B** (`april_2013_iceB`): Run A plus a thin dam across the Atmata 4.4 km
+  below Rusnė, at (333087, 6136621) EPSG:3346, with one SFINCS type-5 timed gate in
+  it — 200 m wide, sill −4.0 m, n 0.03, closed from the start, opened at 18 Apr
+  12:00 over 1 day.
+- **Experiment 3** (`april_2013_iceC`): the same dam with two 100 m gates, both
+  closing on 12 Apr over 1 day, one released on 18 Apr and the other on 21 Apr.
+
+| | observed | Run A (no blockage) | Run B (one release, 18 Apr) | Experiment 3 (releases 18 + 21 Apr) |
+| --- | --- | --- | --- | --- |
+| A2a +0.20 m crossing at Uostadvaris | 19 Apr 08:00 | 15 Apr 16:50, −87 h, not met | 18 Apr 13:10, **−19 h, met** | 18 Apr 03:10, −29 h, not met |
+| A6a Rusnė rise | 1.53 m | 1.33 m, −0.20 m, not met | 1.23 m, −0.30 m, not met | 1.55 m, **+0.03 m, met** |
+| A6b Rusnė crest | 20–23 Apr plateau | 21 Apr, met | 18 Apr, not met | 17 Apr, not met |
+| Uostadvaris bias, scoring window (r) | — | +0.09 m (0.90) | **+0.02 m (0.94)** | +0.03 m (0.92) |
+| A2b Uostadvaris crest | 22–24 Apr plateau | 25 Apr 00:10, not met | 25 Apr 00:20, not met | 25 Apr 00:20, not met |
+| flooded area, delta window | — | 63.5 km² | 84.5 km² | 81.3 km² |
+
+- **Run A** is the new baseline. Levels improve (A1 +0.07 m, A3 +0.02 m,
+  Uostadvaris bias +0.09 m) but the timing does not (A2a −87 h), and Rusnė now
+  rises too little (1.33 m vs 1.53 m).
+- **Run B** meets A2a and gives Uostadvaris the observed flat-then-jump shape
+  (bias +0.02 m, r 0.94). But Rusnė rises too early behind the dam and falls after
+  the release: A6a −0.30 m, crest on 18 Apr.
+- **Experiment 3** gets Rusnė's rise right (1.55 m vs 1.53 m) but peaks too early
+  (17 Apr) and too sharply, and A2a is −29 h.
+
+None of the three moves A2b: Uostadvaris still crests on 25 Apr.
+
+**Conclusion.** The April delta-timing misses (A2a, A2b) and Rusnė's missing rise
+(A6a) are the signature of an unmodelled ice jam on the lower Atmata that built up
+gradually and gave way over ~18–22 April. Neither input correction fixes them, and
+only a blockage reproduces both the Rusnė and the Uostadvaris signatures. That
+makes them a limitation of what the model is given, not a defect in it. **The jam
+is not built into the published model**: there is no observation of when it formed
+or released, and fitting a gate's timing to one gauge would be curve-fitting. The
+experiments are kept as the evidence.
 
 ### Two data fixes behind these numbers
 
@@ -592,14 +740,17 @@ blocks 166 and 169 differ as 167 did. So 168 is the outlier that matches, not
 predates the API's. Only 167 was refreshed, so a step may remain at the block
 boundaries; that is recorded in the database's own `source` row and in
 `tests/test_forcing_provenance.py`. April's forcing changed by −17 to −0.2 m³/s
-across 168 hours, all in the 5–11 April spin-up, with the crest untouched at
-2150 m³/s. Xaver's forcing did not change at all.
+across 168 hours, all in the 5–11 April spin-up, with the Smalininkai crest
+untouched at 2150 m³/s (1926 m³/s at Rusnė since the river-input corrections).
+Xaver's forcing did not change at all.
 
 **Uostadvaris moved onto its gauge** — see *Station positions* below. These two,
 plus the two geometry fixes below (the strait centreline and the distributary beds),
 are the four changes that explain every number that differed from the 2026-09-16 run
 by 2026-09-17. The fifth, the fitted sea boundary of 2026-09-28 (see "Sea boundary:
-fitted to the daily Klaipeda readings"), explains every difference since.
+fitted to the daily Klaipeda readings"), and the sixth, the river-input corrections
+re-run the same afternoon (commit 9ace515; see "River inputs: Nemunas share and
+measured Minija"), explain every difference since.
 
 ### The first cause: a 4 km gap in the burned strait channel
 
@@ -807,23 +958,26 @@ Numbers pasted from `results/april_2013{,_gridwind,_gridwind_pressure}/validatio
 
 | run | A1 Uostadvaris peak err m | A2a crossing dt h | A2b model crest | A3 head err m | A4 Klaipeda fit RMSE m (info) | A6a Rusnė rise err m | Nida bias m | Ventė bias m | flooded area km² | verdicts met |
 |---|---|---|---|---|---|---|---|---|---|---|
-| baseline (uniform wind) | +0.13 | −96 | 25 Apr 00:20 | +0.09 | 0.002 | −0.11 | −0.02 | +0.10 | 73.3 | A1, A3, A5, A6a, A6b |
-| gridded wind | +0.11 | −94 | 25 Apr 00:10 | +0.08 | 0.001 | −0.11 | −0.03 | +0.10 | 70.2 | A1, A3, A5, A6a, A6b |
-| gridded wind + pressure | +0.11 | −92 | 25 Apr 00:10 | +0.08 | 0.001 | −0.11 | −0.03 | +0.09 | 70.0 | A1, A3, A5, A6a, A6b |
+| baseline (uniform wind) | +0.07 | −87 | 25 Apr 00:10 | +0.02 | 0.002 | −0.20 | −0.06 | +0.07 | 63.5 | A1, A3, A5, A6b |
+| gridded wind | +0.05 | −86 | 25 Apr 00:20 | +0.01 | 0.001 | −0.20 | −0.07 | +0.06 | 60.2 | A1, A3, A5, A6b |
+| gridded wind + pressure | +0.05 | −86 | 25 Apr 00:20 | +0.01 | 0.001 | −0.20 | −0.07 | +0.06 | 60.0 | A1, A3, A5, A6b |
 
 **Gridded forcing changes no April verdict, and no score by more than 0.02 m.**
-The two misses, A2a and A2b, barely move across the three runs: A2a's crossing
-between −96 and −92 h, A2b's crest between 00:10 and 00:20 on 25 April. That is
+The three misses barely move across the three runs: A2a's crossing between −87
+and −86 h, A2b's crest between 00:10 and 00:20 on 25 April, A6a −0.20 m in all
+three. That is
 the expected answer for a freshet under light winds (peak 12–13 m/s, against
 Xaver's 20.6), and it is useful as a negative result: wind spatial structure, and
 pressure on top of it, can be struck off as causes of the April misses. What
-remains is what "Results: April 2013" locates — the eastern side standing
-0.10–0.15 m high and the delta filling early — with Klaipėda's bias +0.00 m in
-every variant, since the boundary is fitted to its readings. The only material
-change is flooded area (73.3 km² → 70.2 and 70.0 km²), the same direction as
-Xaver's gridded runs but smaller, consistent with a weaker wind over the delta.
-The static-offset versions of these runs gave the same picture on the wind
-(no verdict changed), with A3 and A4 failing in all three.
+remains is what "Results: April 2013" locates — the delta filling early and
+Rusnė rising too little, the signature of an unmodelled ice jam — with Klaipėda's
+bias +0.00 m in every variant, since the boundary is fitted to its readings. The
+only material change is flooded area (63.5 km² → 60.2 and 60.0 km²), the same
+direction as Xaver's gridded runs but smaller, consistent with a weaker wind over
+the delta. The earlier versions of these runs gave the same picture on the wind
+(no verdict changed): before the river-input corrections 73.3 → 70.2 and 70.0 km²
+with A6a met in all three, and on the static offset with A3 and A4 failing in all
+three.
 
 ## Reproducing from a clean checkout
 
