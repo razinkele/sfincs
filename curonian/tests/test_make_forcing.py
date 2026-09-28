@@ -87,7 +87,8 @@ def test_real_gauges_and_discharge():
     assert abs(obs.loc["2013-12-06 06:00"] - 0.92) < 1e-9
     q = mf.discharge_forcing(XAVER)
     assert q.index[0] == common.TREF and q.index[-1] == common.TSTOP
-    assert 350 < q[1].loc["2013-12-01":"2013-12-05"].mean() < 600 and (q[2] == common.MINIJA_Q_DEC).all()
+    assert 300 < q[1].loc["2013-12-01":"2013-12-05"].mean() < 550
+    assert 20 < q[2].min() and q[2].max() < 200          # measured Minija, m3/s
 
 
 def test_boundary_forcing_raises_when_the_period_cannot_be_filled():
@@ -131,8 +132,10 @@ def test_wind_check_still_demands_the_gale_for_xaver():
 def test_april_discharge_carries_the_freshet_and_its_own_minija():
     q = mf.discharge_forcing(APRIL)
     assert q.index[0] == APRIL.tref and q.index[-1] == APRIL.tstop
-    assert 2000 < q[1].loc["2013-04-19":"2013-04-21"].max() < 2300      # the crest
-    assert (q[2] == common.MINIJA_Q_APR).all()
+    assert 1800 < q[1].loc["2013-04-19":"2013-04-21"].max() < 2000      # the crest, 0.896 x 2150
+    # measured Minija: ~14-20 m3/s before the freshet, peaking ~144 on 14 Apr
+    assert q[2].loc["2013-04-05":"2013-04-10"].max() < 25
+    assert 130 < q[2].loc["2013-04-13":"2013-04-16"].max() < 160
 
 
 @pytest.mark.integration

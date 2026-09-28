@@ -104,7 +104,6 @@ def test_xaver_event_carries_todays_constants_unchanged():
     ev = common.event("xaver_2013")
     assert (ev.tref, ev.tstop) == (common.TREF, common.TSTOP)
     assert ev.calm_window == common.CALM_WINDOW
-    assert ev.minija_q == common.MINIJA_Q_DEC
     assert ev.data_window == ("2013-11-20", "2013-12-20")   # today's SQL literals
     assert ev.score_window == (pd.Timestamp("2013-12-05"), pd.Timestamp("2013-12-09"))
     assert ev.zsini is None                                  # taken from the boundary
@@ -120,7 +119,6 @@ def test_april_event_matches_the_spec():
     assert ev.score_window == (pd.Timestamp("2013-04-13"), pd.Timestamp("2013-05-02"))
     assert ev.data_window == ("2013-03-26", "2013-05-12")
     assert ev.gtsm_months == ("04", "05")
-    assert ev.minija_q == common.MINIJA_Q_APR == 83.0
     assert ev.wind_check is None
     assert ev.zsini == -0.17
     assert ev.score_label == "Scoring window"
@@ -136,9 +134,15 @@ def test_inputs_dir_derives_from_the_name_and_run_dir_does_not():
 
 def test_events_are_frozen():
     with pytest.raises(Exception):
-        common.event("xaver_2013").minija_q = 99.0
+        common.event("xaver_2013").nemunas_lag_days = 2
 
 
 def test_unknown_event_names_itself_and_the_alternatives():
     with pytest.raises(KeyError, match="april_2013"):
         common.event("april2013")
+
+
+def test_nemunas_delta_factor_is_the_documented_split():
+    """1.12 tributary uplift x (1 - 0.20 Gilija share): the sibling project's
+    documented transformation (see the constant's comment)."""
+    assert common.NEMUNAS_DELTA_FACTOR == pytest.approx(0.896)

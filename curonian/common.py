@@ -43,15 +43,18 @@ CALM_WINDOW = (pd.Timestamp("2013-11-28"), pd.Timestamp("2013-12-04"))
 
 GAUGE_ZERO_CM = 500.0
 KLAIPEDA_MOUTH_LONLAT = (21.09, 55.72)
-MINIJA_Q_DEC = 46.0
 NEMUNAS_LAG_DAYS = 1
 
-# April's Minija constant. The DB's Minija record ends in 2011, so April gets a
-# constant as December does. Anomaly-scaled rather than climatological: the Nemunas
-# mean over the April run window (1279 m3/s) is 1.56x its April climatology (820
-# m3/s over 25 Aprils, 1990-2014), and 1.56 x the Minija's own April climatology at
-# Lankupiai (53) = 83. Inside the observed April range there (max 272).
-MINIJA_Q_APR = 83.0
+# Share of the Smalininkai discharge that reaches the Rusne apex, where the model
+# injects the Nemunas: x1.12 for the tributaries joining below Smalininkai (Sesupe,
+# Jura, Sesuvis; flow-weighted annual ratio, Umgiesser et al. 2016 method) and
+# x0.80 for the ~20 % that leaves through the Gilija/Matrosovka branch to the
+# southern lagoon before Rusne (Zemlys et al. 2013: 124 of 624 m3/s; ~80 % through
+# the right distributaries, Valiuskevicius et al. 2019). The same documented
+# transformation the sibling SHYFEM project uses (~/curonian/etl/03_river_forcing_export.py:
+# TRIB_UPLIFT, MATROSOVKA_FRAC). Until 2026-09-28 the model injected 1.00 x
+# Smalininkai, ~12 % too much water into the delta.
+NEMUNAS_DELTA_FACTOR = 1.12 * (1.0 - 0.20)
 
 
 @dataclass(frozen=True)
@@ -71,7 +74,6 @@ class Event:
     peak_window: tuple                                # forcing_summary.txt slice
     peak_label: str
     gtsm_months: tuple
-    minija_q: float
     nemunas_lag_days: int
     wind_check: tuple | None                          # (min peak m/s, what it is)
     zsini: float | None                               # None = take it from the boundary
@@ -95,7 +97,7 @@ EVENTS = {
         # refactor changed no bytes, and tref-8d..tstop+9d is not a round pad.
         data_window=("2013-11-20", "2013-12-20"),
         peak_window=("2013-12-05", "2013-12-08"), peak_label="storm",
-        gtsm_months=("11", "12"), minija_q=MINIJA_Q_DEC,
+        gtsm_months=("11", "12"),
         nemunas_lag_days=NEMUNAS_LAG_DAYS,
         wind_check=(15.0, "the Xaver gale"), zsini=None,
         score_label="Storm window"),
@@ -106,7 +108,7 @@ EVENTS = {
         score_window=(pd.Timestamp("2013-04-13"), pd.Timestamp("2013-05-02")),
         data_window=("2013-03-26", "2013-05-12"),
         peak_window=("2013-04-19", "2013-04-25"), peak_label="crest",
-        gtsm_months=("04", "05"), minija_q=MINIJA_Q_APR,
+        gtsm_months=("04", "05"),
         nemunas_lag_days=NEMUNAS_LAG_DAYS,
         # No wind signature to assert in a freshet; the span guard in
         # make_forcing.wind_forcing still runs. See spec section 6.

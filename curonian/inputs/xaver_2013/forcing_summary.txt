@@ -2,4 +2,4 @@ GTSM corrected by 15 Klaipeda 06:00 readings: residual -0.034..+0.247 m (mean +0
 boundary level: start 0.40 m, storm peak 1.02 m at 2013-12-06 16:00:00
 Klaipeda 06h obs peak: 0.88 m at 2013-12-06 06:00:00
 wind peak: 19.5 m/s at 2013-12-06 06:00:00 from 236 deg
-Nemunas Q: 351..653 m3/s; Minija constant 46.0 m3/s
+Nemunas Q at Rusne (0.896 x Smalininkai): 314..585 m3/s; Minija (Lankupiai): 45..105 m3/s

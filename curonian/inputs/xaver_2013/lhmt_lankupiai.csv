@@ -1,0 +1,43 @@
+# Minija daily discharge and water level at Lankupiai, 20 Nov - 20 Dec 2013.
+#
+# Source: Lithuanian Hydrometeorological Service (LHMT) open API, api.meteo.lt,
+#   /v1/hydro-stations/lankupiu-minija-vms/observations/historical/<YYYY-MM>
+# Retrieved 2026-09-17 (~/curonian/DATA/LHMT_api/lhmt_lankupiai_2012_2014.csv).
+#   Licence: CC BY-SA 4.0 -- attribution is a condition of access, so it
+#   travels with this file.
+#
+# Lankupiai is ~10 km above the Minija mouth, so the model uses waterDischarge
+# as the mouth inflow with no lag or scaling (the sibling project's documented
+# choice for this gauge). waterLevel is on the station's own gauge zero, unused.
+observationDateUtc,waterLevel,waterDischarge
+2013-11-20,549,40.5
+2013-11-21,551,41
+2013-11-22,549,37.7
+2013-11-23,548,35
+2013-11-24,546,32.8
+2013-11-25,545,32.7
+2013-11-26,548,34.8
+2013-11-27,561,43.2
+2013-11-28,566,47.2
+2013-11-29,577,55.6
+2013-11-30,579,56.9
+2013-12-01,576,55
+2013-12-02,563,45
+2013-12-03,578,55
+2013-12-04,575,52
+2013-12-05,585,58
+2013-12-06,631,93
+2013-12-07,638,96
+2013-12-08,649,105
+2013-12-09,637,96
+2013-12-10,614,79
+2013-12-11,599,70
+2013-12-12,605,79
+2013-12-13,639,114
+2013-12-14,660,139
+2013-12-15,660,141
+2013-12-16,642,123
+2013-12-17,622,104
+2013-12-18,601,85
+2013-12-19,590,75
+2013-12-20,580,67

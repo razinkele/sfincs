@@ -168,9 +168,18 @@ def cmems_daily_boundary(event: common.Event,
 
 
 def discharge_forcing(event: common.Event) -> pd.DataFrame:
-    """Nemunas discharge at Smalininkai, from LHMT's own published series.
+    """Nemunas inflow at the Rusne apex and Minija inflow at its mouth, from
+    LHMT's own published series.
 
-    Deliberately NOT from curonian_db.gpkg, which other projects share. That
+    Nemunas: Smalininkai, lagged NEMUNAS_LAG_DAYS and scaled by
+    common.NEMUNAS_DELTA_FACTOR (tributaries below Smalininkai in, the Gilija
+    share out). Minija: measured at Lankupiai (inputs/<event>/lhmt_lankupiai.csv);
+    until 2026-09-28 it was an estimated constant (46 / 83 m3/s), which in April
+    ran ~5x the measured flow in the week before the freshet.
+
+    The Smalininkai series is read from LHMT rather than curonian_db.gpkg:
+
+    deliberately NOT from curonian_db.gpkg, which other projects share. That
     database keeps an older extraction, `smalininkai 2013 01-06.xls`, as the
     source for its own validated runs: `~/curonian/etl/20_load_lhmt_hydro.py`
     states the policy and its reason -- LHMT and the xls differ by a few percent
@@ -183,17 +192,27 @@ def discharge_forcing(event: common.Event) -> pd.DataFrame:
     this model the authority's current record while leaving theirs alone. The
     divergence is asserted, not assumed -- see tests/test_forcing_provenance.py.
     """
-    src = event.inputs_dir / "lhmt_smalininkai.csv"
-    df = pd.read_csv(src, comment="#", parse_dates=["observationDateUtc"])
+    nem = lag_and_resample(lhmt_daily_discharge(event, "lhmt_smalininkai.csv"),
+                           event.nemunas_lag_days, event.tref, event.tstop)
+    nem = nem * common.NEMUNAS_DELTA_FACTOR          # tributaries in, Gilija share out
+    # Minija: measured at Lankupiai, ~10 km above the mouth -- no lag, no scaling.
+    minija = lag_and_resample(lhmt_daily_discharge(event, "lhmt_lankupiai.csv"),
+                              0, event.tref, event.tstop)
+    for name, q in (("Nemunas", nem), ("Minija", minija)):
+        if not q.notna().all() or q.index[0] != event.tref or q.index[-1] != event.tstop:
+            raise ValueError(f"{name} discharge does not cover {event.name} cleanly: "
+                             f"{q.index[0]}..{q.index[-1]} with {int(q.isna().sum())} NaN")
+    return pd.DataFrame({1: nem.values, 2: minija.values}, index=nem.index)
+
+
+def lhmt_daily_discharge(event: common.Event, fname: str) -> pd.Series:
+    """Daily waterDischarge from an LHMT API file in the event's inputs, over
+    the event's data window."""
+    df = pd.read_csv(event.inputs_dir / fname, comment="#", parse_dates=["observationDateUtc"])
     df = df[df["waterDischarge"].notna()]
     lo, hi = (pd.Timestamp(d) for d in event.data_window)
     df = df[(df["observationDateUtc"] >= lo) & (df["observationDateUtc"] <= hi)]
-    daily = pd.Series(df["waterDischarge"].astype(float).values, index=df["observationDateUtc"])
-    nem = lag_and_resample(daily, event.nemunas_lag_days, event.tref, event.tstop)
-    if not nem.notna().all() or nem.index[0] != event.tref or nem.index[-1] != event.tstop:
-        raise ValueError(f"Nemunas discharge does not cover {event.name} cleanly: "
-                         f"{nem.index[0]}..{nem.index[-1]} with {int(nem.isna().sum())} NaN")
-    return pd.DataFrame({1: nem.values, 2: event.minija_q}, index=nem.index)
+    return pd.Series(df["waterDischarge"].astype(float).values, index=df["observationDateUtc"])
 
 
 def discharge_points() -> gpd.GeoDataFrame:
@@ -235,7 +254,9 @@ def main(event: common.Event, static: Path = common.INPUTS, use_cmems: bool = Fa
                f"{event.peak_label} peak {peak.max():.2f} m at {peak.idxmax()}\n"
                f"Klaipeda 06h obs peak: {klaipeda_06.max():.2f} m at {klaipeda_06.idxmax()}\n"
                f"wind peak: {wind['mag'].max():.1f} m/s at {wind['mag'].idxmax()} from {wind.loc[wind['mag'].idxmax(), 'dir']:.0f} deg\n"
-               f"Nemunas Q: {dis[1].min():.0f}..{dis[1].max():.0f} m3/s; Minija constant {event.minija_q} m3/s\n")
+               f"Nemunas Q at Rusne ({common.NEMUNAS_DELTA_FACTOR:.3f} x Smalininkai): "
+               f"{dis[1].min():.0f}..{dis[1].max():.0f} m3/s; Minija (Lankupiai): "
+               f"{dis[2].min():.0f}..{dis[2].max():.0f} m3/s\n")
     gap = abs(peak.idxmax() - klaipeda_06.idxmax())
     if gap > pd.Timedelta("12h"):
         summary += (f"FINDING: GTSM {event.peak_label} peak ({peak.idxmax()}) is {gap} from the Klaipeda 06:00 gauge peak "

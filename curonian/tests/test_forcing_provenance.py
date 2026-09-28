@@ -79,7 +79,8 @@ def test_discharge_forcing_reproduces_lhmt_with_the_documented_lag(event):
     was re-ingested from LHMT -- so every day of every event is checked at the full
     0.5 m3/s tolerance. The skip stays for the next stale block.
     """
-    obs, nem = lhmt(event), model(event)[1]
+    # dis.csv carries the Rusne-apex inflow: Smalininkai x NEMUNAS_DELTA_FACTOR
+    obs, nem = lhmt(event) * common.NEMUNAS_DELTA_FACTOR, model(event)[1]
     stale_before = KNOWN_STALE_BEFORE.get(event.name)
     compared = 0
     for t in _midnights(event):
@@ -108,7 +109,8 @@ def test_the_lag_is_applied_in_the_right_direction(event):
     counted, same_day/wrong_way could never reach n and both assertions below would be
     unfalsifiable -- passing even with no lag applied at all.
     """
-    obs, nem = lhmt(event), model(event)[1]
+    # dis.csv carries the Rusne-apex inflow: Smalininkai x NEMUNAS_DELTA_FACTOR
+    obs, nem = lhmt(event) * common.NEMUNAS_DELTA_FACTOR, model(event)[1]
     stale_before = KNOWN_STALE_BEFORE.get(event.name)
     midnights = [t for t in _midnights(event)
                  if stale_before is None or t - pd.Timedelta(days=event.nemunas_lag_days) >= stale_before]
@@ -128,12 +130,18 @@ def test_the_lag_is_applied_in_the_right_direction(event):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("event", PROV_EVENTS, ids=lambda e: e.name)
-def test_minija_column_is_the_documented_constant(event):
-    """Column 2 is Minija, held constant; a units slip would show here."""
+def test_minija_column_is_the_measured_lankupiai_series(event):
+    """Column 2 is the Minija, measured at Lankupiai with no lag: at each
+    midnight it must equal that day's LHMT reading."""
+    df = pd.read_csv(event.inputs_dir / "lhmt_lankupiai.csv", comment="#", parse_dates=["observationDateUtc"])
+    obs = df.set_index("observationDateUtc")["waterDischarge"].astype(float)
     minija = model(event)[2]
-    assert (minija == event.minija_q).all()
-    assert 10.0 < event.minija_q < 200.0, "implausible as m3/s for the Minija"
-
+    compared = 0
+    for t in _midnights(event):
+        if t in obs.index:
+            assert minija.loc[t] == pytest.approx(obs.loc[t], abs=0.01), f"{t:%Y-%m-%d}"
+            compared += 1
+    assert compared >= 14, f"only {compared} days compared"
 
 @pytest.mark.integration
 def test_the_shared_database_deliberately_differs_from_this_model_s_discharge():
