@@ -5,25 +5,25 @@ Whole period: 2013-11-28 00:00 to 2013-12-11 00:00
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 13 | +0.00 | 0.00 | 1.00 | +0.15 | -6 |
-| Nida | 26 | -0.00 | 0.06 | 0.92 | -0.00 | +2 |
-| Vente | 26 | +0.06 | 0.09 | 0.87 | +0.07 | +1 |
-| Uostadvaris | 13 | -0.01 | 0.04 | 0.96 | +0.01 | +0 |
+| Nida | 26 | -0.01 | 0.06 | 0.92 | -0.01 | +2 |
+| Vente | 26 | +0.06 | 0.08 | 0.87 | +0.07 | +1 |
+| Uostadvaris | 13 | -0.02 | 0.04 | 0.96 | -0.00 | +0 |
 
 Storm window: 2013-12-05 00:00 to 2013-12-09 00:00
 
 | station | n | bias m | RMSE m | r | peak err m | peak dt h |
 |---|---|---|---|---|---|---|
 | Klaipeda | 4 | +0.00 | 0.01 | 1.00 | +0.15 | -6 |
-| Nida | 8 | -0.04 | 0.09 | 0.85 | -0.03 | +0 |
-| Vente | 8 | +0.04 | 0.09 | 0.79 | +0.07 | +0 |
-| Uostadvaris | 4 | -0.03 | 0.06 | 0.94 | +0.01 | +0 |
+| Nida | 8 | -0.05 | 0.09 | 0.85 | -0.03 | +0 |
+| Vente | 8 | +0.04 | 0.09 | 0.79 | +0.06 | +0 |
+| Uostadvaris | 4 | -0.04 | 0.06 | 0.94 | -0.00 | +0 |
 
-Flooded land in the delta window (depth > 5 cm, ground > 0 m): **131.3 km²**
+Flooded land in the delta window (depth > 5 cm, ground > 0 m): **130.2 km²**
 
 ### Success criteria (spec section 9)
-- C1 Uostadvaris peak [2013-12-05 00:00 to 2013-12-09 00:00]: **met** -- model peak 2013-12-06 06:20, peak err +0.01 m, dt +0.3 h (threshold: peak err within +/-0.15 m and |dt| <= 6 h)
-- C2 Nida 8 Dec rise [2013-12-07 06:00 to 2013-12-08 18:00]: **met** -- model 0.44 m -> 0.81 m vs gauge 0.84 m, err -0.03 m, rise reproduced (threshold: err within +/-0.15 m (<=0.10 m for a clean 'met'), rise reproduced in sign)
+- C1 Uostadvaris peak [2013-12-05 00:00 to 2013-12-09 00:00]: **met** -- model peak 2013-12-06 06:20, peak err -0.00 m, dt +0.3 h (threshold: peak err within +/-0.15 m and |dt| <= 6 h)
+- C2 Nida 8 Dec rise [2013-12-07 06:00 to 2013-12-08 18:00]: **met** -- model 0.43 m -> 0.81 m vs gauge 0.84 m, err -0.03 m, rise reproduced (threshold: err within +/-0.15 m (<=0.10 m for a clean 'met'), rise reproduced in sign)
 - C3 Klaipeda boundary fit [2013-12-05 00:00 to 2013-12-09 00:00]: **info** -- storm RMSE 0.01 m (whole-period RMSE 0.00 m) (threshold: n/a -- the sea boundary is fitted to these readings; not an independent test)
 - C4 Silute uplands [delta window (325000, 6105000, 360000, 6145000)]: **met** -- 0.00% of land with ground > 3 m flooded (threshold: < 1 % flooded)
-- Info: Uostadvaris 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.75 m vs gauge 0.83 m, err -0.08 m (threshold: n/a (context only))
+- Info: Uostadvaris 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.74 m vs gauge 0.83 m, err -0.09 m (threshold: n/a (context only))
 - Info: Nida 8 Dec 06:00 [2013-12-08 06:00]: **info** -- model 0.64 m vs gauge 0.74 m, err -0.10 m (threshold: n/a (context only))
