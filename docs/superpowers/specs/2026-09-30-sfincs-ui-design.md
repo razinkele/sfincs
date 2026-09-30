@@ -121,9 +121,14 @@ Layers:
   in `app/` stay green. Both `sfincs_viewer` and `sfincs_ui` get a
   `pyproject.toml` and are pip-installed into the `shiny` env (as SHYFEM UI
   is); the viewer's `deploy.sh` gains that install step, since it copies
-  `app/*.py` flat today and `app.py` imports the modules by bare name. In
-  `sfincs_ui` figures are served through a per-run dynamic route, not the
-  viewer's single static mount.
+  `app/*.py` flat today and `app.py` imports the modules by bare name.
+  `deploy_ui.sh` pip-installs `sfincs_viewer` into the model env as well
+  (same root-pip pattern as the osmose deploy), which is what lets the
+  export shim and `build_generic.py` import `map_core` there without path
+  shims; `build_generic.py` is a standalone script with no `sfincs_ui`
+  imports, invoked by absolute path under the prod clone. In `sfincs_ui`
+  figures are served through a per-run dynamic route, not the viewer's
+  single static mount.
 
 Template interface. A template answers five questions:
 
@@ -219,7 +224,9 @@ workflow and its tests are unchanged:
 - `prep/export_map_cache.py`: `--event` (today `event_for_run` keys on the
   run *name* and exits for anything not in `EVENTS`), `--run-dir`,
   `--out-dir`; its `sys.path` shim that imports `map_core` from `app/` is
-  repointed to `from sfincs_viewer import map_core`.
+  repointed to `from sfincs_viewer import map_core` in milestone 4, with the
+  extraction (in milestone 3 the Curonian export stage keeps the existing
+  `app/` shim, which works from the model env today).
 - `common.py`: the gauge database path (today `Path.home() /
   "curonian/curonian_db.gpkg"`, which resolves to `/home/shiny/...` under
   the service user) becomes `SFINCS_CURONIAN_DB` from the environment with
@@ -312,8 +319,11 @@ longer does.
 **Storage.** A Curonian run directory is 1.3 GB with the export cache: map
 350 MB, subgrid products about 490 MB (`subgrid/` 290 MB, `sfincs_subgrid.nc`
 200 MB), export cache about 410 MB, the rest small. Maintenance deletes
-`subgrid/` after a successful build (the table `sfincs_subgrid.nc` is what
-the solver reads), deletes the export cache when a run is unpinned and past
+`subgrid/` once a run reaches `finished` (the table `sfincs_subgrid.nc` is
+what the solver reads; the `manning*.tif` inside `subgrid/` stays
+inspectable while the run is building, running or failed, and the model-env
+roughness test of section 6 is a standalone build that maintenance never
+touches), deletes the export cache when a run is unpinned and past
 retention, and deletes run directories older than the retention (default 60
 days) unless pinned. It enforces a per-user quota (default 20 GB). A launch is
 also refused when free space on the workspace volume is below a global floor
@@ -408,7 +418,8 @@ run from there as short-lived subprocesses, so the line-drift argument does
 not apply to them.
 
 **Deployment.** `deploy/deploy_ui.sh`, the osmose shape: the prod clone, pip
-install of `sfincs_viewer` and `sfincs_ui` into the `shiny` env, a
+install of `sfincs_viewer` and `sfincs_ui` into the `shiny` env and of
+`sfincs_viewer` into the model env, a
 `sfincs-ui.service` unit running `uvicorn` as `shiny` on `PORT` with
 `--root-path /sfincs-ui`, `KillMode=process` and the `Environment=` lines
 above, an nginx location inserted at the known anchor with
