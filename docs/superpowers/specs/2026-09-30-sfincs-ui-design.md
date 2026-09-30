@@ -12,9 +12,10 @@ open runs that their owners marked public, read-only.
 
 The first template is the Curonian Lagoon model that already lives in
 `curonian/` (two events, three forcing variants, validation against four
-gauges). The architecture is generic: a later template will wrap hydromt_sfincs
-setup steps directly so that a model can be built for any region from a data
-catalogue, DelftDashboard-style. That generic template is a separate spec.
+gauges). The architecture is generic: a `hecras` template imports a HEC-RAS 6
+model into a SFINCS project (section 7), and a later generic template will let
+a user draw a domain and pull a DEM from a data catalogue, DelftDashboard-style,
+on the same builder. That generic template's UI is a separate spec.
 
 The existing read-only viewer (`app/`, https://laguna.ku.lt/sfincs/) stays as it
 is and keeps publishing the hindcasts in `curonian/results/`. The new app is
@@ -53,6 +54,7 @@ thing anywhere is this repo's own viewer.
 | Where runs live | A UI-owned workspace outside the repo. Never `curonian/runs` or `curonian/results`, so the published viewer never lists UI runs. |
 | External data | The UI does not fetch ERA5, GTSM or CMEMS. Forcing comes from the prepared `curonian/inputs/<event>/` files. Fetching stays a command-line step (credentials, scratch directories). |
 | Binary | Referenced by path from configuration, never bundled. The Deltares licence terms stay in the repo root. |
+| HEC-RAS import | Own navbar entry. A fresh parser for SFINCS's needs (perimeters, BC lines, cell elevation and roughness, projection, hydrographs) tested on the TELEMAC viewer's three fixture files; not a copy of the TELEMAC parser, which reads mesh topology SFINCS never uses. Parsing in the UI process (h5py is in the `shiny` env, not the model env), building in the model env from plain artefacts. |
 
 ## 1. Architecture
 
@@ -71,7 +73,13 @@ Layers:
     monitor, cancel, pin, publish), `results_service` (his/map readers,
     validation tables, map frames), `maintenance` (retention, quotas).
   - Templates: `templates/base.py` (interface), `templates/curonian.py`,
-    `templates/plane_beach.py` (the test template, from `test_model/`).
+    `templates/plane_beach.py` (the test template, from `test_model/`),
+    `templates/hecras.py` (section 7).
+  - HEC-RAS parser: `hecras/` (reader for `.g##.hdf` and `.u##/.p##.hdf`,
+    unit conversion, artefact writer).
+  - Generic builder: `build_generic.py`, run in the model env; reads a
+    project's artefacts and calls hydromt_sfincs setup methods. Used by the
+    `hecras` template now and by the generic template later.
 - **Database**: SQLite through SQLAlchemy, Alembic migrations. Tables in
   section 2.
 - **Workspace** on disk: `<workspace>/<project_id>/<run_id>/` holds every
@@ -218,6 +226,12 @@ Same navbar, shell and theme toggle as SHYFEM UI.
   `settings.json`, validation markdown; `sfincs_map.nc` only on request).
 - **Compare**. Two to four runs of the same event: overlaid station series,
   criteria side by side, settings diff, depth-difference map at a chosen hour.
+- **Import from HEC-RAS** (login). Upload widgets for the geometry file,
+  the optional unsteady-flow file and the optional DEM; a settings strip
+  (resolution, target CRS, constant level for normal-depth lines, time
+  window when no unsteady file); Preview and Convert buttons; a log panel;
+  a deck.gl map of perimeters, BC lines coloured by type, the proposed grid
+  box and the DEM footprint. Convert creates the project and opens Setup.
 - **Admin**. Users and roles, queue policy, retention, quota, storage by user,
   audit log.
 
@@ -286,11 +300,75 @@ Milestones, each shippable:
 3. Curonian template: Setup form, map preview, `--run-dir` changes to the
    three pipeline scripts.
 4. Results page on the shared viewer package; Compare page.
-5. Retention, quotas, public runs, polish.
-6. Generic hydromt_sfincs template (separate spec).
+5. HEC-RAS import: parser, artefacts, `build_generic.py`, `hecras`
+   template, Import page.
+6. Retention, quotas, public runs, polish.
+7. Generic template UI (draw a domain, DEM from a data catalogue) on
+   `build_generic.py` (separate spec).
+
+## 7. Import from HEC-RAS
+
+Added 2026-09-30 after the section review. Modelled on the TELEMAC viewer's
+"HEC-RAS → TELEMAC Import" tab (`/srv/shiny-server/telemac/server_import.py`,
+`telemac_tools/hecras/`), adapted to a regular-grid model: no meshing, and the
+file's projection is read rather than entered.
+
+**Inputs.** A HEC-RAS 6 geometry file (`.g##.hdf`, required), the matching
+unsteady-flow file (`.u##.hdf` or `.p##.hdf`, optional: supplies hydrographs
+and the simulation window) and a DEM GeoTIFF (optional, recommended).
+
+**What is read** (HEC-RAS 6.x HDF layout, verified on the fixtures Coal,
+Muncie and Roseberry Creek): root attributes `Projection` (WKT) and
+`Units System`; per 2D flow area `Perimeter`, `Cells Center Coordinate`,
+`Cells Minimum Elevation`, `Cells Center Manning's n`; `Boundary Condition
+Lines` (name, area, External/Internal, polyline); from the unsteady file the
+`Flow Hydrograph` and `Stage Hydrograph` per boundary and the time window.
+
+**Mapping to SFINCS.**
+
+| HEC-RAS | SFINCS |
+|---|---|
+| 2D flow-area perimeters | active mask (`setup_mask_active` with the perimeter polygons); grid = their bounding box, rotation 0 |
+| cell size | default `dx = dy` = median cell size; user-editable |
+| `Projection` WKT | `epsg`/CRS. US-customary files: coordinates reprojected to the metre-based UTM zone of the centroid, elevations ×0.3048, flows ×0.028317 |
+| DEM GeoTIFF, else `Cells Minimum Elevation` rasterised | `setup_dep`; the cell-based fallback is flagged "coarse elevation from HEC-RAS cells" |
+| `Cells Center Manning's n` rasterised, else area default | `setup_manning_roughness(datasets_rgh=…)` or constant |
+| external BC line with stage hydrograph | water-level boundary: `setup_mask_bounds(btype="waterlevel", include_mask=line buffer)` + `setup_waterlevel_forcing` |
+| external BC line with flow hydrograph | discharge source at the line's midpoint: `setup_discharge_forcing` |
+| external BC line with normal depth or no hydrograph | water-level boundary at a user-entered constant level, flagged in the form |
+| internal BC lines, breaklines, structures, 1D reaches | drawn on the preview, not used in v1 |
+| unsteady window | `tref`, `tstart`, `tstop`; else user-entered |
+| reference points | `setup_observation_points` when present |
+
+1D-only models are refused with the message "SFINCS needs a 2D flow area".
+
+**Artefacts.** Parsing runs in the UI process at upload and writes into the
+project workspace: `perimeter.geojson`, `bc_lines.geojson` (with type and
+role), `bzs.csv`, `dis.csv`, `dep.tif` (uploaded or derived), `manning.tif`,
+`import.json` (source file names, projection, units, conversions applied,
+warnings). Raw HDF uploads are discarded after conversion, as in the TELEMAC
+viewer. The `hecras` template's settings document references these artefacts
+plus resolution, CRS, constant levels, the time window, threads and the same
+solver overrides as the Curonian template.
+
+**Build.** `build_generic.py` in the model env reads the artefacts and calls
+the setup methods above; it never opens an HDF file. Validation: none, so
+Results shows "not scored" and the station plots come from `sfincs_his.nc`
+at the reference points only.
+
+**Tests.** Parser tests on the three fixtures (perimeter counts, BC line
+types, projection parsed, unit conversion of a US-customary file); artefact
+writer round trip; `build_generic.py` builds a model from a fixture's
+artefacts (skipped when the model env is absent); one page test of the
+Import UI; the Playwright pass adds "import Muncie, convert, open Setup".
+
+**Later milestones.** Breaklines as thin dams (`setup_structures`), 1D
+reaches as burned rivers, comparison of SFINCS against HEC-RAS results
+(`.p##.hdf` water surface at reference lines).
 
 ## Out of scope for v1
 
 Fetching external forcing; editing geometry (channels, stations) in the
 browser; self-registration; Celery or multi-host execution; any change to the
-published viewer's behaviour beyond the package move.
+published viewer's behaviour beyond the package move; HEC-RAS breaklines,
+structures, 1D reaches and results comparison.
