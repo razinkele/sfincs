@@ -48,8 +48,8 @@ thing anywhere is this repo's own viewer.
 | Who may launch runs | Login required to build and run; anonymous read-only access to public runs. |
 | Base | New package in the SHYFEM UI mould, reusing its auth, session, access-control, audit and job-queue modules. Not an extension of `app/`, not DelftDashboard. |
 | Framework | Shiny for Python (matches SHYFEM UI, the viewer and the toolbox). Plotly for time series, deck.gl via `shiny_deckgl` for maps. |
-| Serving | Shiny Server in the shared `shiny` env, like SHYFEM UI. Fallback if websocket issues appear: the osmose-style standalone uvicorn systemd unit. |
-| Environments | UI process in `/opt/micromamba/envs/shiny`. Builds and validations are subprocesses in `/opt/micromamba/envs/hydromt-sfincs`; simulations are subprocesses of `sfincs-linux/bin/sfincs`. No merged environment. |
+| Serving | Standalone uvicorn systemd unit as user `shiny` on its own port behind nginx, the osmose pattern. Not Shiny Server: it reaps an app's process a few seconds after its last client leaves (the eutropy block raises `app_idle_timeout` to 3600 s for this reason) and every deploy restarts the process, which is the wrong lifetime for hour-long runs. |
+| Environments | UI process in `/opt/micromamba/envs/shiny`. Builds, validations and exports are subprocesses run as `micromamba run -n hydromt-sfincs python …` (a command prefix, so the env's activation hooks set PROJ and GDAL data paths; the bare interpreter path is not used); simulations are subprocesses of `sfincs-linux/bin/sfincs`. No merged environment. |
 | Where runs live | A UI-owned workspace outside the repo. Never `curonian/runs` or `curonian/results`, so the published viewer never lists UI runs. |
 | External data | The UI does not fetch ERA5, GTSM or CMEMS. Forcing comes from the prepared `curonian/inputs/<event>/` files. Fetching stays a command-line step (credentials, scratch directories). |
 | Binary | Referenced by path from configuration, never bundled. The Deltares licence terms stay in the repo root. |
@@ -80,7 +80,10 @@ Layers:
   (`map_core.py`, `map_data.py`, `map_ui.py`, `sfincs_data.py`) move to an
   importable package `sfincs_viewer/` that both `app/` and `sfincs_ui/`
   import. This is the one refactor of existing code. The 81 tests in `app/`
-  stay green and unchanged in intent.
+  stay green and unchanged in intent. Both `sfincs_viewer` and `sfincs_ui`
+  get a `pyproject.toml` and are pip-installed into the `shiny` env (as
+  SHYFEM UI is); the viewer's `deploy.sh` gains that install step, since it
+  copies `app/*.py` flat today and `app.py` imports the modules by bare name.
 
 Template interface. A template answers three questions:
 
@@ -122,7 +125,9 @@ Tables:
 - Solver overrides, each shown with the model default, bounds and an
   explanation: `manning_land`, `manning_sea`, `alpha`, `huthresh`, `zsini`,
   `dtmax`, `viscosity`, `advection`, `tstop` (must lie within the event's
-  data window). Nothing else in `sfincs.inp` is editable in v1.
+  data window; if it is set before the end of the event's score window the
+  run is not validated and Results says "not scored: run ends before the
+  scoring window"). Nothing else in `sfincs.inp` is editable in v1.
 - Resources: OpenMP threads, 1 to the admin thread cap.
 
 **Bounded changes to the pipeline scripts** so the template drives them
@@ -163,13 +168,29 @@ validations up to 2 concurrently. Jobs of a run execute in order. A failed
 stage stops the chain and marks the run `failed` with the stage name and the
 last 50 log lines in `summary_json`.
 
-**Lifecycle.** Cancel sends SIGTERM to the stage's process group, SIGKILL
-after 30 s. On server restart, rows left in an active status are marked
-`orphaned` and their directories kept. Maintenance deletes run directories
-older than the retention (default 60 days) unless pinned, and enforces a
-per-user storage quota (default 20 GB; a Curonian run is about 1.3 GB, mostly
-`sfincs_map.nc`). A launch that would exceed the quota is refused with the
-current usage in the message.
+**Process lifetime.** Every stage subprocess is launched detached: its own
+session (`start_new_session=True`, as SHYFEM UI does), stdout and stderr
+redirected to the stage's log file, working directory the run directory, and
+its pid stored in `jobs.pid` before it is awaited. A stage therefore survives
+the UI process: a deploy restart, a crash or a closed browser tab costs no
+compute.
+
+**Reconciliation on startup.** For every job row left in an active status the
+queue checks the pid: alive (and the process is the one recorded, checked by
+start time) → resume monitoring it; dead with the stage's expected outputs
+complete (`sfincs_his.nc` closed and the log's final summary present for
+simulate; the model files for build) → mark the stage finished and continue
+the chain; otherwise → mark the run `failed` with reason "interrupted". The
+status `orphaned` is reserved for a job whose directory has gone.
+
+**Cancel** sends SIGTERM to the stage's process group, SIGKILL after 30 s.
+
+**Storage.** Maintenance deletes run directories older than the retention
+(default 60 days) unless pinned, and enforces a per-user quota (default
+20 GB; a Curonian run is about 1.3 GB, mostly `sfincs_map.nc`). A launch is
+also refused when free space on the workspace volume is below a global floor
+(default 100 GB; the volume is shared with TELEMAC and some 25 other apps and
+had 228 GB free on 2026-09-30). Both refusals state the current numbers.
 
 **Log streaming.** The Runs page tails the active stage's log every 2 s while
 that run is selected. Nothing is pushed to clients that are not looking.
@@ -211,16 +232,23 @@ account.
 **Configuration** via environment variables with prefix `SFINCS_UI_`
 (pydantic-settings): `WORKSPACE`, `DATABASE_URL` (default SQLite under the
 workspace), `SFINCS_BIN`, `MODEL_PYTHON` (the hydromt-sfincs interpreter),
-`CURONIAN_DIR`, `URL_PREFIX`, `MAX_SIMULATIONS`, `MAX_THREADS`. Deploy writes
-`_sfincs_ui_env.py` next to `app.py`, as the viewer's deploy does, because
-Shiny Server does not pass environment through.
+`CURONIAN_DIR`, `URL_PREFIX`, `MAX_SIMULATIONS`, `MAX_THREADS`,
+`MIN_FREE_GB`. `MODEL_PYTHON` is a command prefix (default
+`micromamba run -n hydromt-sfincs python`), not an interpreter path.
 
-**Deployment.** `deploy/deploy_ui.sh`, the viewer's idempotent shape: install
-code under `/srv/shiny-server/sfincs-ui`, insert the Shiny Server and nginx
-blocks at the known anchors, register `sfincs-ui` in the catalogue, run
-migrations, verify the model env, the binary and read access to
-`curonian/inputs` for the `shiny` user, touch `restart.txt`. Workspace at
-`/srv/sfincs-ui/workspace`, owned by `shiny`.
+**Deployment.** `deploy/deploy_ui.sh`, the osmose shape: a dedicated prod
+clone under `/srv/shiny-server/sfincs-ui-src` (never a symlink to the dev
+tree, for the reason recorded in osmose's deploy script), pip install of
+`sfincs_viewer` and `sfincs_ui` into the `shiny` env, a
+`sfincs-ui.service` unit running `uvicorn` as `shiny` on port 8839 with
+`--root-path /sfincs-ui`, an nginx location inserted at the known anchor,
+registration in the catalogue, migrations, and a preflight that verifies as
+user `shiny`: the model env imports hydromt_sfincs and opens a GeoTIFF, the
+binary executes, and every path in `curonian/data_catalog.yml` plus
+`curonian/inputs` is readable (all world-readable on 2026-09-30). Workspace at
+`/srv/sfincs-ui/workspace`, owned by `shiny`. Configuration goes in the unit's
+`Environment=` lines; no `_sfincs_ui_env.py` shim is needed outside Shiny
+Server.
 
 **Errors.** Services raise typed exceptions (`TemplateError`, `BuildError`,
 `QueueFull`, `QuotaExceeded`, `NotAllowed`); pages show a notification with
@@ -236,8 +264,10 @@ Tests (pytest, `shiny` env, like `app/`):
 
 - Services without Shiny. Template: settings → build command and `sfincs.inp`
   overrides; invalid settings rejected. Queue: chain order, failure stops the
-  chain, cancel kills a fake process, orphan marking on restart, concurrency
-  and thread caps. Auth and access control tests come across with the code.
+  chain, cancel kills a fake process, concurrency and thread caps, quota and
+  free-space refusals. Reconciliation: a queue restarted over a fake job that
+  is still alive resumes it; over a dead one with complete outputs finishes
+  it; over a dead one with partial outputs fails it. Auth and access control tests come across with the code.
 - One end-to-end pipeline test on the plane-beach template (seconds):
   finished run with `sfincs_his.nc` and the expected end level. The only test
   touching the real binary; skipped when it is absent.
@@ -248,10 +278,11 @@ Tests (pytest, `shiny` env, like `app/`):
 
 Milestones, each shippable:
 
-1. Package skeleton, database, auth, Admin page, deploy script. Login works
-   on laguna.ku.lt.
+1. Package skeleton, `sfincs_viewer/` extraction, database, auth, Admin
+   page, service unit and deploy script. Login works on laguna.ku.lt.
 2. Queue and the plane-beach template end to end: create, launch, watch,
-   download `sfincs_his.nc`.
+   download `sfincs_his.nc`. Includes restarting the service mid-run and
+   seeing the run finish.
 3. Curonian template: Setup form, map preview, `--run-dir` changes to the
    three pipeline scripts.
 4. Results page on the shared viewer package; Compare page.
