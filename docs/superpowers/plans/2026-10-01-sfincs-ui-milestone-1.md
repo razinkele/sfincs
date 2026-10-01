@@ -1179,6 +1179,11 @@ def test_delete_last_admin_refused(auth):
     admin, _ = auth.ensure_admin("root", "pw12345678")
     with pytest.raises(ValueError):
         auth.delete_user(admin["id"])
+    # an inactive second admin does not count as a usable replacement
+    other = auth.create_user("other", "pw12345678", role="admin")
+    auth.update_user(other["id"], is_active=False)
+    with pytest.raises(ValueError):
+        auth.delete_user(admin["id"])
 
 
 def test_update_user_refuses_to_strip_last_admin(auth):
@@ -1300,7 +1305,7 @@ Apply these edits to `auth_service.py` (the file is 577 lines; every edit is a d
                 raise ValueError(f"role must be one of {ROLES}")
 ```
 
-4. `delete_user`: delete the `from shyfem_ui.models.user import ProjectPermission` import, the `from shyfem_ui.models.project import Job, Project` and `from shyfem_ui.models.workflow import Workflow` imports, and the four `session.query(ProjectPermission|Project|Job|Workflow)...` lines. Keep `session.query(WSAuthToken).filter_by(user_id=user_id).delete()` (sessions go through the FK cascade). Keep the last-admin check.
+4. `delete_user`: delete the `from shyfem_ui.models.user import ProjectPermission` import, the `from shyfem_ui.models.project import Job, Project` and `from shyfem_ui.models.workflow import Workflow` imports, and the four `session.query(ProjectPermission|Project|Job|Workflow)...` lines. Keep `session.query(WSAuthToken).filter_by(user_id=user_id).delete()` (sessions go through the FK cascade). Change the last-admin check to count **active** admins, matching the `update_user` guard: `admin_count = session.query(User).filter(User.role == ROLE_ADMIN, User.is_active.is_(True)).count()`; otherwise one active plus one deactivated admin still permits deleting the only usable admin.
 5. Delete the whole `ensure_user` method (tutorial bootstrap).
 6. `ensure_admin`: return `(self._user_to_dict(admin), False)` when an admin exists and `(created_dict, True)` after creating one; drop the `f"{username}@localhost"` email fallback (pass `email` through, it is nullable now). Update its docstring: "Returns the admin dict and whether it was created."
 7. `_user_to_dict`: unchanged.
@@ -1659,6 +1664,29 @@ class TestPassThrough:
         assert get_current_user() is None
 
 
+class TestRootPath:
+    async def test_login_route_matches_with_root_path_in_scope_path(self):
+        """uvicorn --root-path /sfincs-ui delivers path=/sfincs-ui/login."""
+        send = AsyncMock()
+        inner = AsyncMock()
+        await SessionAuthMiddleware(inner, MagicMock())(_scope(path="/sfincs-ui/login", root_path="/sfincs-ui"), AsyncMock(), send)
+        inner.assert_not_called()
+        assert _responses(send)[0]["status"] == 200 and b"csrf_token" in _responses(send)[1]["body"]
+
+    async def test_login_route_matches_without_root_path_in_scope_path(self):
+        send = AsyncMock()
+        inner = AsyncMock()
+        await SessionAuthMiddleware(inner, MagicMock())(_scope(path="/login", root_path="/sfincs-ui"), AsyncMock(), send)
+        inner.assert_not_called()
+        assert _responses(send)[0]["status"] == 200
+
+    async def test_whoami_under_root_path(self):
+        auth = MagicMock(); auth.validate_session.return_value = None
+        send = AsyncMock()
+        await SessionAuthMiddleware(AsyncMock(), auth, root_path="/sfincs-ui")(_scope(path="/sfincs-ui/api/whoami", root_path="/sfincs-ui"), AsyncMock(), send)
+        assert dict(_responses(send)[0]["headers"])[b"content-type"] == b"application/json"
+
+
 class TestLogin:
     async def test_get_login_serves_form_with_csrf_cookie(self):
         send = AsyncMock()
@@ -1894,6 +1922,19 @@ def _cookie_header(scope) -> dict[str, str]:
     return {}
 
 
+def _strip_root(path: str, root_path: str) -> str:
+    """Path relative to the mount.
+
+    uvicorn 0.49 (this host) puts ``--root-path`` in front of ``scope["path"]``
+    (measured 2026-10-01: a request for /login with --root-path /sfincs-ui
+    arrives as path=/sfincs-ui/login, root_path=/sfincs-ui). Older servers and
+    test transports deliver /login. Accept both.
+    """
+    if root_path and (path == root_path or path.startswith(root_path + "/")):
+        return path[len(root_path):] or "/"
+    return path
+
+
 _LOGIN_HTML = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in - SFINCS UI</title>
@@ -1956,7 +1997,7 @@ class SessionAuthMiddleware:
         session_token = _cookie_header(scope).get(SESSION_COOKIE)
 
         if scope["type"] == "http":
-            path, method = scope.get("path", "/"), scope.get("method", "GET")
+            path, method = _strip_root(scope.get("path", "/"), root_path), scope.get("method", "GET")
             if path == "/login" and method == "GET":
                 await self._serve_login(send, root_path)
                 return
@@ -2092,7 +2133,7 @@ class SessionAuthMiddleware:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cd /home/razinka/sfincs/sfincs_ui && /opt/micromamba/envs/shiny/bin/python -m pytest tests/test_session_auth_middleware.py -q`
-Expected: 19 passed
+Expected: 22 passed
 
 - [ ] **Step 6: Commit**
 
@@ -2114,7 +2155,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `Config` (Task 1).
-- Produces: `EnvironmentReport(problems: list[str], checked_at: datetime)` with `.ok`; `check_environment(config, *, deep=False, runner=subprocess.run) -> EnvironmentReport`. `runner` has `subprocess.run`'s signature and is injected by tests. Shallow checks (startup): binary exists, is executable and prints the SFINCS banner within 15 s; the model-python prefix imports `hydromt_sfincs` and `rasterio` within 120 s; `curonian_dir` holds `build_model.py` and `validate.py`; the workspace exists and is writable. Deep checks (deploy preflight, `python -m sfincs_ui preflight`): additionally the model env opens `inputs/lagoon_bathy_50m.tif` with rasterio; `common.read_table` reads the gauge database (`SELECT 1`); `inputs/<event>/era5_grid.nc` and `inputs/<event>/gtsm/` are readable for `xaver_2013` and `april_2013`; the three absolute catalogue paths listed in `curonian/data_catalog.yml` under `path:` are readable.
+- Produces: `EnvironmentReport(problems: list[str], checked_at: datetime)` with `.ok`; `check_environment(config, *, deep=False, runner=subprocess.run) -> EnvironmentReport`. `runner` has `subprocess.run`'s signature and is injected by tests. Shallow checks (startup): binary exists, is executable and prints the SFINCS banner within 15 s; the model-python prefix imports `hydromt_sfincs` and `rasterio` within 120 s; `curonian_dir` holds `build_model.py` and `validate.py`; the workspace exists and is writable. Deep checks (deploy preflight, `python -m sfincs_ui preflight`): additionally the model env opens `inputs/lagoon_bathy_50m.tif` with rasterio; the gauge database named by `SFINCS_CURONIAN_DB` (default `/home/razinka/curonian/curonian_db.gpkg`) opens read-only with `sqlite3` from the UI process (not through `common.read_table`: `curonian/common.py` still resolves the path under `Path.home()`, which is `/home/shiny` for the service user; the env-var rewrite is milestone 3); `inputs/<event>/era5_grid.nc` and `inputs/<event>/gtsm/` are readable for `xaver_2013` and `april_2013`; the three absolute catalogue paths listed in `curonian/data_catalog.yml` under `path:` are readable.
 
 Behaviour recorded on 2026-10-01: running `sfincs-linux/bin/sfincs` in an empty directory prints the `------------ Welcome to SFINCS ------------` banner to stdout, writes `sfincs.log` into the cwd and exits with status 2 (`STOP 2`). The check therefore runs the binary in a fresh temporary directory, requires the banner in stdout, and ignores the exit code.
 
@@ -2228,23 +2269,36 @@ def test_unwritable_workspace_reported(layout):
     assert any("workspace" in p.lower() and "writable" in p.lower() for p in report.problems)
 
 
-def test_deep_checks_inputs_and_catalogue(layout):
+def test_deep_checks_inputs_and_catalogue(layout, tmp_path, monkeypatch):
     cur = layout.curonian_dir
     (cur / "inputs" / "xaver_2013" / "gtsm").mkdir(parents=True)
     (cur / "inputs" / "xaver_2013" / "era5_grid.nc").write_bytes(b"")
     (cur / "inputs" / "april_2013").mkdir()
     (cur / "inputs" / "lagoon_bathy_50m.tif").write_bytes(b"")
     (cur / "data_catalog.yml").write_text("a:\n  path: /nonexistent/one.tif\nb:\n  path: relative/ok.nc\n")
+    monkeypatch.setenv("SFINCS_CURONIAN_DB", str(tmp_path / "missing.gpkg"))
     runner = _fake_runner({str(layout.sfincs_bin): (2, BANNER), "fake-python": (0, b"")})
     report = check_environment(layout, deep=True, runner=runner)
     joined = "\n".join(report.problems)
     assert "april_2013/era5_grid.nc" in joined and "april_2013/gtsm" in joined
     assert "/nonexistent/one.tif" in joined
     assert "relative/ok.nc" not in joined
-    # deep mode asked the model env to open the GeoTIFF and the gauge database
+    assert "missing.gpkg" in joined and "gauge database" in joined.lower()
+    # deep mode asked the model env to open the GeoTIFF
     snippets = [c[0][-1] for c in runner.calls if c[0][0] == "fake-python"]
     assert any("rasterio.open" in s for s in snippets)
-    assert any("read_table" in s for s in snippets)
+
+
+def test_deep_gauge_database_opens_read_only(layout, tmp_path, monkeypatch):
+    import sqlite3
+
+    db = tmp_path / "gauges.gpkg"
+    sqlite3.connect(db).close()
+    monkeypatch.setenv("SFINCS_CURONIAN_DB", str(db))
+    (layout.curonian_dir / "inputs").mkdir()
+    runner = _fake_runner({str(layout.sfincs_bin): (2, BANNER), "fake-python": (0, b"")})
+    report = check_environment(layout, deep=True, runner=runner)
+    assert not any("gauge database" in p.lower() for p in report.problems)
 
 
 def test_real_binary_prints_banner_if_present():
@@ -2287,6 +2341,7 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -2303,7 +2358,7 @@ EVENTS = ("xaver_2013", "april_2013")
 
 _IMPORT_SNIPPET = "import hydromt_sfincs, rasterio"
 _GEOTIFF_SNIPPET = "import rasterio; rasterio.open({path!r}).close()"
-_GAUGE_SNIPPET = "import common; common.read_table('SELECT 1')"
+DEFAULT_GAUGE_DB = "/home/razinka/curonian/curonian_db.gpkg"
 
 
 @dataclass
@@ -2376,7 +2431,14 @@ def _check_deep(config: Config, runner, problems: list[str]) -> None:
                 problems.append(f"Catalogue path not readable: {m.group(1)}")
     if tif.is_file():
         _run_model_python(config, _GEOTIFF_SNIPPET.format(path=str(tif)), runner, "open a GeoTIFF with rasterio", problems)
-    _run_model_python(config, _GAUGE_SNIPPET, runner, "read the gauge database through common.read_table", problems)
+    # The gauge database is read by validate.py and export_map_cache (milestone
+    # 3 routes them through SFINCS_CURONIAN_DB). Open it read-only here so a
+    # path the service user cannot read is caught at deploy time.
+    gauge_db = os.environ.get("SFINCS_CURONIAN_DB", DEFAULT_GAUGE_DB)
+    try:
+        sqlite3.connect(f"file:{gauge_db}?mode=ro", uri=True).close()
+    except sqlite3.Error as exc:
+        problems.append(f"Gauge database cannot be opened read-only: {gauge_db} ({exc})")
 
 
 def check_environment(config: Config, *, deep: bool = False, runner=subprocess.run) -> EnvironmentReport:
@@ -2392,7 +2454,7 @@ def check_environment(config: Config, *, deep: bool = False, runner=subprocess.r
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd /home/razinka/sfincs/sfincs_ui && /opt/micromamba/envs/shiny/bin/python -m pytest tests/test_environment.py -q`
-Expected: 10 passed (the last one runs the real binary, about a second)
+Expected: 11 passed (the last one runs the real binary, about a second)
 
 - [ ] **Step 5: Commit**
 
@@ -3389,7 +3451,7 @@ Run (from `sfincs_ui/`, two shells or background):
 ```bash
 mkdir -p /tmp/claude-1000/-home-razinka-sfincs/946ef2e3-64b8-42c9-b324-8e8da9f13c98/scratchpad/ws
 export SFINCS_UI_WORKSPACE=/tmp/claude-1000/-home-razinka-sfincs/946ef2e3-64b8-42c9-b324-8e8da9f13c98/scratchpad/ws
-export SFINCS_UI_SECURE_COOKIES=false SFINCS_UI_PORT=8899
+export SFINCS_UI_SECURE_COOKIES=false SFINCS_UI_PORT=8899 SFINCS_UI_URL_PREFIX=/sfincs-ui   # the production shape: uvicorn gets --root-path
 SFINCS_UI_ADMIN_PASSWORD=devpassword1 /opt/micromamba/envs/shiny/bin/python -m sfincs_ui create-admin --username admin
 /opt/micromamba/envs/shiny/bin/python -m sfincs_ui serve &
 sleep 8
@@ -3402,7 +3464,7 @@ curl -s -b /tmp/claude-1000/cj http://127.0.0.1:8899/api/whoami            # {"u
 kill %1
 ```
 
-Expected: the four codes and the whoami JSON as commented. If the websocket identity does not reach the Admin page in a browser later, the first thing to check is the `_wsauth` input (open the page, run `fetch('api/whoami')` in the console).
+Expected: the four codes and the whoami JSON as commented, with `--root-path /sfincs-ui` in effect (the `serve` command passes `root_path=config.url_prefix`), which proves the middleware strips the prefix uvicorn prepends to `scope["path"]`. If the websocket identity does not reach the Admin page in a browser later, the first thing to check is the `_wsauth` input (open the page, run `fetch('api/whoami')` in the console).
 
 - [ ] **Step 8: Commit**
 
@@ -3516,7 +3578,7 @@ async def test_static_asset_is_served(client):
 - [ ] **Step 2: Run the whole suite**
 
 Run: `cd /home/razinka/sfincs/sfincs_ui && /opt/micromamba/envs/shiny/bin/python -m pytest -q`
-Expected: 88 passed. If `test_static_asset_is_served` fails with 404, the `static_assets` path in `create_app` is wrong; it must be the package's `www` directory.
+Expected: 92 passed. If `test_static_asset_is_served` fails with 404, the `static_assets` path in `create_app` is wrong; it must be the package's `www` directory.
 
 - [ ] **Step 3: Commit**
 
@@ -3600,10 +3662,13 @@ WantedBy=multi-user.target
 #
 # SFINCS_UI_* values are ceilings and defaults; admins lower them in the UI.
 # MIN_FREE_GB and UPLOAD_MAX_MB are env-only. HOME is deliberately not set.
+# micromamba is named by absolute path: the unit's PATH is systemd's default
+# and sudo's secure_path differs from a login shell (both include
+# /usr/local/bin on this host as of 2026-10-01, but pinning removes the doubt).
 SFINCS_UI_WORKSPACE=/srv/sfincs-ui/workspace
 SFINCS_UI_CURONIAN_DIR=/home/razinka/sfincs/curonian
 SFINCS_UI_SFINCS_BIN=/home/razinka/sfincs/sfincs-linux/bin/sfincs
-SFINCS_UI_MODEL_PYTHON=micromamba -r /opt/micromamba run -n hydromt-sfincs python
+SFINCS_UI_MODEL_PYTHON=/usr/local/bin/micromamba -r /opt/micromamba run -n hydromt-sfincs python
 SFINCS_UI_URL_PREFIX=@URL_PREFIX@
 SFINCS_UI_PORT=@PORT@
 SFINCS_UI_MAX_SIMULATIONS=1
@@ -3744,13 +3809,17 @@ need_root() { [[ "$(id -u)" -eq 0 ]] || fail "must run as root:  sudo bash deplo
 # Run a sfincs_ui CLI command as the service user with the unit's environment,
 # never as root, so the SQLite file and its -wal/-shm companions stay writable
 # by the service.
+# EXTRA_ENV holds additional KEY=VALUE items for one call (the admin password).
+# Each line of the env file is one array element, so values with spaces such as
+# SFINCS_UI_MODEL_PYTHON survive; never word-split the file into `env`.
+EXTRA_ENV=()
 as_shiny() {
     local -a env_args=()
     while IFS= read -r line; do
         [[ -z "$line" || "$line" == \#* ]] && continue
         env_args+=("$line")
     done < "$ENV_FILE"
-    sudo -u shiny env "${env_args[@]}" "$SHINY_PYTHON" -m sfincs_ui "$@"
+    sudo -u shiny env "${env_args[@]}" "${EXTRA_ENV[@]}" "$SHINY_PYTHON" -m sfincs_ui "$@"
 }
 
 render_template() {  # render_template <template> <dest>
@@ -3913,11 +3982,10 @@ as_shiny preflight || fail "preflight failed; fix the reported paths before publ
 # --- migrations and the first admin, as shiny ------------------------------
 as_shiny migrate
 if [[ -n "${SFINCS_UI_ADMIN_PASSWORD:-}" ]]; then
-    sudo -u shiny env "SFINCS_UI_ADMIN_PASSWORD=${SFINCS_UI_ADMIN_PASSWORD}" \
-        $(grep -v '^#' "$ENV_FILE" | grep -v '^$' | tr '\n' ' ') "$SHINY_PYTHON" -m sfincs_ui create-admin --username "$ADMIN_USERNAME"
-else
-    as_shiny create-admin --username "$ADMIN_USERNAME"
+    EXTRA_ENV=("SFINCS_UI_ADMIN_PASSWORD=${SFINCS_UI_ADMIN_PASSWORD}")
 fi
+as_shiny create-admin --username "$ADMIN_USERNAME"
+EXTRA_ENV=()
 for f in "${WORKSPACE}"/sfincs_ui.db "${WORKSPACE}"/sfincs_ui.db-wal "${WORKSPACE}"/sfincs_ui.db-shm; do
     [[ -e "$f" ]] && [[ "$(stat -c %U "$f")" != "shiny" ]] && fail "${f} is owned by $(stat -c %U "$f"), not shiny"
 done
@@ -4046,7 +4114,7 @@ Render the unit template and check it: `sed -e 's|@PORT@|8840|g' -e 's|@PROD_SRC
 
 Append:
 
-```markdown
+````markdown
 
 ## SFINCS UI (`/sfincs-ui/`)
 
@@ -4078,43 +4146,7 @@ sudo call), unit restart and local HTTP 200, nginx insert and reload, HTTPS
 smoke test of `/` and `/login`, catalogue made visible.
 
 Re-running is idempotent; `create-admin` does nothing when an admin exists.
-```
-
-- [ ] **Step 8: Commit**
-
-```bash
-cd /home/razinka/sfincs
-git add deploy/deploy_ui.sh deploy/sfincs-ui.service.in deploy/sfincs-ui.env.in deploy/sfincs-ui.nginx deploy/services-entry-ui.json deploy/README.md
-git commit -m "deploy: deploy_ui.sh with the sfincs-ui unit (KillMode=process), nginx block and catalogue entry
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
-
-- [ ] **Step 9: User-run acceptance (not the executor's)**
-
-The user runs, in this session: `! sudo bash deploy/deploy_ui.sh` (the script prompts for the admin password unless `SFINCS_UI_ADMIN_PASSWORD` is set in the sudo environment). Then opens https://laguna.ku.lt/sfincs-ui/, logs in as the admin, sees the Admin tab with Users, Queue policy and Audit log, and the audit log shows the `login_success` row. Verify afterwards with `bash deploy/deploy_ui.sh --check` and `systemctl show sfincs-ui -p KillMode` printing `KillMode=process`. The push to `origin/main` must happen before the deploy, since the prod clone fetches from GitHub.
-
----
-
-### Task 11: Package README and final verification
-
-**Files:**
-- Create: `sfincs_ui/README.md`
-- Modify: `README.md` (repo root; one paragraph in the layout table pointing at `sfincs_ui/`)
-
-**Interfaces:** none new.
-
-- [ ] **Step 1: Write the package README**
-
-`sfincs_ui/README.md`:
-
-```markdown
-# sfincs_ui
-
-Web app for laguna.ku.lt through which a logged-in user creates a SFINCS
-project from a template, launches a simulation on the server and inspects the
-results. Design: `docs/superpowers/specs/2026-09-30-sfincs-ui-design.md`.
-Milestone 1 (this state): configuration, database, auth, Admin page, CLI,
+````, CLI,
 service unit and deploy script. Projects, runs and the queue arrive in
 milestone 2.
 
@@ -4202,6 +4234,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - The active-simulate check before restart and the explicit kill of detached stages in `--uninstall` (two `MILESTONE 2` comments in `deploy_ui.sh`).
 - Login rate limiting. SHYFEM UI has a `RateLimitMiddleware`; the spec does not ask for one and the copied `authenticate` already equalises timing for unknown users. Revisit when the app is public.
 - Preflight item "`from sfincs_viewer import map_core` imports in the model env": milestone 4, when the package exists.
+- Preflight item "the gauge database opens read-only through `common.read_table`": milestone 3, together with the `SFINCS_CURONIAN_DB` rewrite of `curonian/common.py`. Milestone 1 opens the file with `sqlite3` from the UI process instead.
 - Seeding `settings.max_threads` to 8 under a 16 ceiling (see the note in Task 10 Step 2).
 - `access_control.can_view_run` / `can_modify_run` and the typed exceptions (`NotAllowed`, `QueueFull`, `QuotaExceeded`, `TemplateError`, `BuildError`): they need runs, so milestone 2 (modify, queue, quota) and milestone 4 (view, baselines).
 - Admin page "storage by user": milestone 6 with retention and quotas.
