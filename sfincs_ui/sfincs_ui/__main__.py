@@ -74,6 +74,54 @@ def _cmd_preflight(_args) -> int:
     return 1
 
 
+def _cmd_active_jobs(_args) -> int:
+    from sfincs_ui.db import base
+    from sfincs_ui.models import ACTIVE_JOB_STATUSES, Job, Run
+    from sfincs_ui.services.procs import is_alive
+
+    base.init_db()
+    s = base.get_session_factory()()
+    try:
+        rows = (s.query(Job, Run).join(Run, Job.run_id == Run.id)
+                .filter(Job.status.in_(ACTIVE_JOB_STATUSES)).order_by(Job.id).all())
+        any_alive = False
+        for job, run in rows:
+            alive = bool(job.pid) and is_alive(job.pid, job.proc_starttime)
+            any_alive = any_alive or (alive and job.stage == "simulate")
+            print(f"{job.stage}\t{job.status}\tpid={job.pid}\talive={'yes' if alive else 'no'}\trun={run.name}\t{run.workdir}")
+        if not rows:
+            return 0
+        return 1 if any_alive else 2
+    finally:
+        s.close()
+
+
+def _cmd_kill_jobs(_args) -> int:
+    from sfincs_ui.db import base
+    from sfincs_ui.models import ACTIVE_JOB_STATUSES, Job, Run
+    from sfincs_ui.services.procs import is_alive, killpg_graceful
+    from sfincs_ui.timeutil import utcnow
+
+    base.init_db()
+    s = base.get_session_factory()()
+    try:
+        rows = s.query(Job).filter(Job.status.in_(ACTIVE_JOB_STATUSES)).order_by(Job.id).all()
+        for job in rows:
+            outcome = "no process"
+            if job.pid and is_alive(job.pid, job.proc_starttime):
+                outcome = killpg_graceful(job.pid, grace_s=30.0)
+            job.status = "cancelled"; job.finished_at = utcnow()
+            run = s.get(Run, job.run_id)
+            if run is not None and run.status not in ("finished", "failed", "cancelled", "orphaned"):
+                run.status = "cancelled"; run.finished_at = utcnow()
+            print(f"{job.stage} pid={job.pid}: {outcome}; run {job.run_id} cancelled")
+        s.commit()
+        print(f"{len(rows)} active job(s) handled")
+        return 0
+    finally:
+        s.close()
+
+
 def _cmd_serve(args) -> int:
     cfg = get_config()
     uvicorn.run(
@@ -97,6 +145,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--email", default=None)
     p.set_defaults(func=_cmd_create_admin)
     sub.add_parser("preflight", help="verify binary, model env, inputs and workspace").set_defaults(func=_cmd_preflight)
+    sub.add_parser("active-jobs", help="list active stage jobs; exit 1 when a simulation is alive").set_defaults(func=_cmd_active_jobs)
+    sub.add_parser("kill-jobs", help="terminate every detached stage and cancel its run (used by uninstall)").set_defaults(func=_cmd_kill_jobs)
     p = sub.add_parser("serve", help="run the app with uvicorn")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=None)

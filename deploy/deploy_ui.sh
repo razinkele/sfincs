@@ -9,6 +9,7 @@
 #   sudo bash deploy/deploy_ui.sh              # install or update (idempotent)
 #   bash deploy/deploy_ui.sh --check           # report state, change nothing, no root
 #   sudo bash deploy/deploy_ui.sh --restart    # restart the service only
+#   sudo bash deploy/deploy_ui.sh --wait       # wait for running simulations, then restart
 #   sudo bash deploy/deploy_ui.sh --uninstall  # remove unit, nginx block, entry, clone
 #
 # Prod runs from its OWN git clone, never a symlink to the dev tree: a
@@ -56,7 +57,7 @@ warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 fail() { echo -e "${RED}[x]${NC} $*" >&2; exit 1; }
 
 MODE="${1:-install}"
-case "$MODE" in install|--check|--restart|--uninstall) ;; *) fail "unknown mode '${MODE}'; use --check, --restart, --uninstall or no argument";; esac
+case "$MODE" in install|--check|--restart|--wait|--uninstall) ;; *) fail "unknown mode '${MODE}'; use --check, --restart, --wait, --uninstall or no argument";; esac
 need_root() { [[ "$(id -u)" -eq 0 ]] || fail "must run as root:  sudo bash deploy/deploy_ui.sh ${*:-}"; }
 
 # Run a sfincs_ui CLI command as the service user with the unit's environment,
@@ -77,6 +78,29 @@ as_shiny() {
 render_template() {  # render_template <template> <dest>
     sed -e "s|@PORT@|${PORT}|g" -e "s|@PROD_SRC@|${PROD_SRC}|g" \
         -e "s|@URL_PREFIX@|${URL_PREFIX}|g" -e "s|@UPLOAD_MAX_MB@|${UPLOAD_MAX_MB}|g" "$1" > "$2"
+}
+
+# Exit 1 from active-jobs means a simulation is alive. The unit's KillMode=process
+# keeps it alive across a restart and the queue reconciles it at startup, so a
+# restart is safe; we warn so the operator knows a run is in flight.
+warn_if_simulating() {
+    local out rc=0
+    out="$(as_shiny active-jobs 2>/dev/null)" || rc=$?   # exit 1 = alive simulation; errexit must not fire here
+    if [[ $rc -eq 1 ]]; then
+        warn "a simulation is running; restarting anyway (KillMode=process keeps it alive, the queue reconciles it):"
+        echo "$out" | sed 's/^/      /'
+    fi
+    return 0
+}
+wait_for_simulations() {  # --wait: poll up to 90 minutes
+    local rc
+    for _ in $(seq 1 180); do
+        rc=0; as_shiny active-jobs >/dev/null 2>&1 || rc=$?
+        [[ $rc -ne 1 ]] && return 0
+        info "a simulation is running; waiting 30 s (--wait)"
+        sleep 30
+    done
+    warn "simulation still running after 90 minutes; restarting anyway"
 }
 
 # ---------------------------------------------------------------------------
@@ -115,9 +139,19 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "$MODE" == "--restart" ]]; then
     need_root --restart
-    # MILESTONE 2: check the jobs table for an active simulate stage here and
-    # wait for it or warn (spec section 3); detached stages survive the restart
-    # thanks to KillMode=process, but the queue must be told to reconcile.
+    warn_if_simulating
+    systemctl restart "$SERVICE_NAME" || fail "could not restart ${SERVICE_NAME}; see: journalctl -u ${SERVICE_NAME} -n 40"
+    info "restarted ${SERVICE_NAME}"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# --wait
+# ---------------------------------------------------------------------------
+if [[ "$MODE" == "--wait" ]]; then
+    need_root --wait
+    [[ -f "$ENV_FILE" ]] || fail "${ENV_FILE} missing; run a full install first"
+    wait_for_simulations
     systemctl restart "$SERVICE_NAME" || fail "could not restart ${SERVICE_NAME}; see: journalctl -u ${SERVICE_NAME} -n 40"
     info "restarted ${SERVICE_NAME}"
     exit 0
@@ -128,8 +162,7 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "$MODE" == "--uninstall" ]]; then
     need_root --uninstall
-    # MILESTONE 2: kill detached model stages explicitly first; systemctl stop
-    # no longer does with KillMode=process.
+    [[ -f "$ENV_FILE" ]] && as_shiny kill-jobs || true
     if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then systemctl stop "$SERVICE_NAME"; fi
     if [[ -f "$SERVICE_FILE" ]]; then
         systemctl disable "$SERVICE_NAME" 2>/dev/null || true
@@ -252,8 +285,7 @@ info "database migrated and owned by shiny"
 render_template "${DEPLOY_DIR}/sfincs-ui.service.in" "$SERVICE_FILE"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || fail "could not enable ${SERVICE_NAME}"
-# MILESTONE 2: before restarting, check the jobs table for an active simulate
-# stage and wait for it or warn (spec section 3).
+warn_if_simulating
 systemctl restart "$SERVICE_NAME"
 CODE="000"
 for _ in $(seq 1 20); do

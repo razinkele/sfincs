@@ -133,8 +133,11 @@ deploys and idle browsers (spec section 5).
 sudo bash deploy/deploy_ui.sh              # install or update
 bash deploy/deploy_ui.sh --check           # state only, no root
 sudo bash deploy/deploy_ui.sh --restart
+sudo bash deploy/deploy_ui.sh --wait       # wait for running simulations, then restart
 sudo bash deploy/deploy_ui.sh --uninstall  # keeps /srv/sfincs-ui/workspace
 ```
+
+A restart while a simulation runs is safe: the unit's `KillMode=process` leaves the solver alive and the queue reconciles it at startup; the script warns. systemd logs `Found left-over process … Ignoring` for the surviving solver, which is expected.
 
 | Target | Change | Backup |
 |---|---|---|
