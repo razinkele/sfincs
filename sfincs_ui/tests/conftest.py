@@ -31,3 +31,21 @@ def _reset_config():
     config.reset_config()
     yield
     config.reset_config()
+
+
+@pytest.fixture
+def db(tmp_path, monkeypatch):
+    """A migrated SQLite database in tmp_path; returns the session factory.
+
+    Points the global engine at the temp file so services built without an
+    explicit session_factory also use it.
+    """
+    from sfincs_ui import config
+    from sfincs_ui.db import base
+
+    cfg = config.Config(workspace=tmp_path, database_url=f"sqlite:///{tmp_path / 'test.db'}")
+    config.set_config(cfg)
+    base.reset_engine()
+    base.init_db()
+    yield base.get_session_factory()
+    base.reset_engine()
