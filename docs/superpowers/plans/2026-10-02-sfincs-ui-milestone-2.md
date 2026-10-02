@@ -142,7 +142,7 @@ def test_deleting_owner_keeps_project_as_system_owned(db):
 
 
 def test_vocabularies():
-    assert "orphaned" in RUN_STATUSES and "orphaned" in ACTIVE_JOB_STATUSES is False
+    assert "orphaned" in RUN_STATUSES and "orphaned" not in ACTIVE_JOB_STATUSES
     assert JOB_STAGES == ("build", "simulate", "validate", "export")
 ```
 
@@ -1210,6 +1210,7 @@ def test_killpg_graceful_terminates_then_kills(sleeper):
         time.sleep(0.5)
         assert killpg_graceful(sleeper.pid, grace_s=5) == "terminated"
         assert killpg_graceful(stubborn.pid, grace_s=1) == "killed"
+        stubborn.wait()  # reap: a zombie still answers killpg, so "gone" needs the exit collected
         assert killpg_graceful(stubborn.pid, grace_s=1) == "gone"
     finally:
         for p in (sleeper, stubborn):
@@ -1346,8 +1347,15 @@ def proc_starttime(pid: int) -> int | None:
 
 
 def is_alive(pid: int, starttime: int | None) -> bool:
+    """Exists, is not a zombie, and (when known) still has the recorded start time.
+
+    A finished child of this process is a zombie until reaped; /proc still
+    lists it, so without the state check a monitor would never see it end.
+    """
     current = proc_starttime(pid)
-    return current is not None and (starttime is None or current == starttime)
+    if current is None or _is_zombie(pid):
+        return False
+    return starttime is None or current == starttime
 
 
 def killpg_graceful(pid: int, grace_s: float = 30.0, sleep=time.sleep) -> str:
@@ -1441,7 +1449,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: models (Task 1), `Template`/`TEMPLATES` (Task 3), `write_overrides`, `read_settings`, `proc_starttime`, `is_alive`, `killpg_graceful`, `tail_lines`, `FINISHED_LINE` (Task 4), `SettingsService.get("max_simulations")`, `Config.sfincs_bin`.
-- Produces: `StageSpec(stage, argv, cwd, env, log_path, evidence)` dataclass; `JobRunner(config, settings_service, session_factory=None, *, templates=None, reconciler=None, poll_interval=0.5, grace_s=30.0, aux_cap=2)` with `async start()` (runs `reconciler(self)` when given, then marks itself started), `async stop()` (cancels the chain tasks only), `submit(run_id) -> asyncio.Task` (chain from stage 0), `resume(run_id, stage_index, inherited: tuple[int, int] | None) -> asyncio.Task` (chain from `stage_index`; when `inherited=(pid, starttime)` the first stage is monitored, not spawned), `async cancel(run_id)`, `async wait(run_id, timeout)` (await the chain task), `plan_stages(run_id) -> list[StageSpec]`, `active_jobs() -> list[dict]` (rows with status in `ACTIVE_JOB_STATUSES`, with run name, stage, pid, started_at), `spawned_pids: set[int]`, `started: bool`. Module helpers: `build_evidence(run_dir, template) -> bool`, `simulate_evidence(run_dir) -> bool`, `validate_evidence(run_dir) -> bool`, `export_evidence(run_dir) -> bool`, `evidence_for(stage, run_dir, template)`, `LOG_NAMES = {"build": "build.log", "simulate": "sfincs.log", "validate": "validate.log", "export": "export.log"}`, `SUMMARY_TAIL = 50`.
+- Produces: `StageSpec(stage, argv, cwd, env, log_path, stdout_path, evidence)` dataclass (`log_path` is the file progress, evidence and the failure summary read; `stdout_path` is where the child's stdout and stderr are redirected; for `simulate` they differ, because the solver opens and truncates `sfincs.log` itself, so its stdout goes to `simulate.log`; other stages use one file for both); `JobRunner(config, settings_service, session_factory=None, *, templates=None, reconciler=None, poll_interval=0.5, grace_s=30.0, aux_cap=2)` with `async start()` (runs `reconciler(self)` when given, then marks itself started), `async stop()` (cancels the chain tasks only), `submit(run_id) -> asyncio.Task` (chain from stage 0), `resume(run_id, stage_index, inherited: tuple[int, int] | None) -> asyncio.Task` (chain from `stage_index`; when `inherited=(pid, starttime)` the first stage is monitored, not spawned), `async cancel(run_id)`, `async wait(run_id, timeout)` (await the chain task), `plan_stages(run_id) -> list[StageSpec]`, `active_jobs() -> list[dict]` (rows with status in `ACTIVE_JOB_STATUSES`, with run name, stage, pid, started_at), `spawned_pids: set[int]`, `started: bool`. Module helpers: `build_evidence(run_dir, template) -> bool`, `simulate_evidence(run_dir) -> bool`, `validate_evidence(run_dir) -> bool`, `export_evidence(run_dir) -> bool`, `evidence_for(stage, run_dir, template)`, `LOG_NAMES = {"build": "build.log", "simulate": "sfincs.log", "validate": "validate.log", "export": "export.log"}`, `STDOUT_NAMES = {**LOG_NAMES, "simulate": "simulate.log"}`, `SUMMARY_TAIL = 50`.
 - Run status transitions: `queued` → (`building` | `running` | `validating` | `exporting` as each stage claims) → `finished`; `failed` with `summary_json = {"stage", "reason", "exit_code", "log_tail"}`; `cancelled`.
 
 Design, for the implementer (spec section 3): a stage is **claimed** under an `asyncio.Lock` when capacity allows (simulate: fewer than `max_simulations` jobs with stage `simulate` and status `running`; other stages: fewer than `aux_cap` running), by setting the job to `running` with `started_at`; then it is **spawned** with `subprocess.Popen(argv, cwd=..., env=..., stdout=<log file>, stderr=subprocess.STDOUT, stdin=DEVNULL, start_new_session=True)`, the pid and `proc_starttime(pid)` are written to the job row **before** monitoring begins; the **monitor** polls every `poll_interval`: with a `Popen` handle, `proc.poll()` yields the exit code; for an inherited pid, `is_alive(pid, starttime)` yields liveness and the exit code stays `None`. `except asyncio.CancelledError` is never written around the child: the loop simply propagates cancellation. After the process ends the stage is **judged**: exit code 0 or `None`, plus the stage's evidence, means `completed`; otherwise `failed` with the last 50 log lines. After `build` completes, and before judging, the runner applies the template's overrides (`write_overrides`) so `overrides.diff` is the last build artefact. `cancel()` marks the run `cancelled`, runs `killpg_graceful(pid, grace_s)` in `asyncio.to_thread`, then cancels the chain task; a chain that sees `cancelled` after its monitor returns stops without touching the run status.
@@ -1477,6 +1485,7 @@ exit 0
 # FAKE_STEPS=<n>    progress lines (default 4)      FAKE_SLEEP=<s>  between lines (default 0.05)
 # FAKE_FAIL_SIM=1   exit 3 before the finish line   FAKE_STUBBORN=1 ignore SIGTERM
 set -u
+exec >> sfincs.log 2>&1   # like the real solver: it writes its own sfincs.log in the cwd
 if [[ "${FAKE_STUBBORN:-0}" == "1" ]]; then trap '' TERM; fi
 echo "------------ Welcome to SFINCS ------------"
 echo "threads=${OMP_NUM_THREADS:-unset}"
@@ -1621,7 +1630,7 @@ def runner(db, tmp_path):
     from tests.fake_template import FAKE_SFINCS, FakeTemplate
 
     cfg = config.Config(workspace=tmp_path, database_url=f"sqlite:///{tmp_path / 'test.db'}", sfincs_bin=FAKE_SFINCS,
-                        max_simulations=1, max_threads=4)
+                        max_simulations=1, max_threads=4, min_free_gb=10)
     config.set_config(cfg)
     r = JobRunner(cfg, SettingsService(cfg, session_factory=db), session_factory=db,
                   templates={"fake": FakeTemplate(), "fake_v": FakeTemplate(with_validation=True)}, poll_interval=0.05, grace_s=2.0)
@@ -1770,6 +1779,7 @@ async def test_active_jobs_and_plan_stages(runner, db, tmp_path, monkeypatch):
     assert [s.stage for s in specs] == ["build", "simulate"]
     assert specs[1].argv[0].endswith("fake_sfincs.sh") and specs[1].env["OMP_NUM_THREADS"] == "1"
     assert specs[1].cwd == run_row(db, run_id)["workdir"] and specs[1].log_path.name == "sfincs.log"
+    assert specs[1].stdout_path.name == "simulate.log" and specs[0].stdout_path == specs[0].log_path
     await runner.start()
     runner.submit(run_id)
     while not any(j["stage"] == "simulate" and j["status"] == "running" for j in run_row(db, run_id)["jobs"]):
@@ -1824,6 +1834,8 @@ from sfincs_ui.timeutil import utcnow
 logger = logging.getLogger(__name__)
 
 LOG_NAMES = {"build": "build.log", "simulate": "sfincs.log", "validate": "validate.log", "export": "export.log"}
+# The solver opens and truncates sfincs.log itself; its stdout must not share that file.
+STDOUT_NAMES = {**LOG_NAMES, "simulate": "simulate.log"}
 SUMMARY_TAIL = 50
 OVERRIDES_DIFF = "overrides.diff"
 
@@ -1834,7 +1846,8 @@ class StageSpec:
     argv: list[str]
     cwd: Path
     env: dict[str, str]
-    log_path: Path
+    log_path: Path       # read for progress, evidence and the failure summary
+    stdout_path: Path    # child's stdout+stderr; equals log_path except for simulate
     evidence: Callable[[], bool]
 
 
@@ -1885,6 +1898,7 @@ class JobRunner:
         self._grace = grace_s
         self._aux_cap = aux_cap
         self._tasks: dict[str, asyncio.Task] = {}
+        self._procs: dict[str, subprocess.Popen] = {}  # live Popen handles, reaped after cancel
         self._claim_lock = asyncio.Lock()
         self.spawned_pids: set[int] = set()
         self.started = False
@@ -1943,20 +1957,20 @@ class JobRunner:
     def plan_stages(self, run_id: str) -> list[StageSpec]:
         run, _project, template, settings, run_dir = self._load(run_id)
         base_env = {k: v for k, v in os.environ.items()}
-        specs = [StageSpec("build", template.build_command(run_dir, settings, self._config),
-                           template.stage_cwd("build", run_dir, self._config), base_env,
-                           run_dir / LOG_NAMES["build"], evidence_for("build", run_dir, template))]
-        specs.append(StageSpec("simulate", [str(self._config.sfincs_bin)], run_dir,
-                               {**base_env, "OMP_NUM_THREADS": str(run.threads)},
-                               run_dir / LOG_NAMES["simulate"], evidence_for("simulate", run_dir, template)))
+
+        def spec(stage: str, argv: list[str], cwd: Path, env: dict[str, str]) -> StageSpec:
+            return StageSpec(stage, argv, cwd, env, run_dir / LOG_NAMES[stage], run_dir / STDOUT_NAMES[stage],
+                             evidence_for(stage, run_dir, template))
+
+        specs = [spec("build", template.build_command(run_dir, settings, self._config),
+                      template.stage_cwd("build", run_dir, self._config), base_env)]
+        specs.append(spec("simulate", [str(self._config.sfincs_bin)], run_dir, {**base_env, "OMP_NUM_THREADS": str(run.threads)}))
         vcmd = template.validate_command(run_dir, settings, self._config)
         if vcmd:
-            specs.append(StageSpec("validate", vcmd, template.stage_cwd("validate", run_dir, self._config), base_env,
-                                   run_dir / LOG_NAMES["validate"], evidence_for("validate", run_dir, template)))
+            specs.append(spec("validate", vcmd, template.stage_cwd("validate", run_dir, self._config), base_env))
         ecmd = template.export_command(run_dir, settings, self._config)
         if ecmd:
-            specs.append(StageSpec("export", ecmd, template.stage_cwd("export", run_dir, self._config), base_env,
-                                   run_dir / LOG_NAMES["export"], evidence_for("export", run_dir, template)))
+            specs.append(spec("export", ecmd, template.stage_cwd("export", run_dir, self._config), base_env))
         return specs
 
     # -- chain -------------------------------------------------------------
@@ -1970,7 +1984,14 @@ class JobRunner:
             return
         for index in range(start_index, len(specs)):
             spec = specs[index]
-            ok = await self._run_stage(run_id, spec, inherited if index == start_index else None)
+            try:
+                ok = await self._run_stage(run_id, spec, inherited if index == start_index else None)
+            except asyncio.CancelledError:
+                raise  # uvicorn shutdown: leave the child and the rows alone for reconciliation
+            except Exception as exc:
+                logger.exception("stage %s of run %s raised", spec.stage, run_id)
+                self._fail_run(run_id, spec.stage, f"internal error: {exc}", None, tail_lines(spec.log_path, SUMMARY_TAIL))
+                return
             if not ok:
                 return
         self._finish_run(run_id)
@@ -1983,11 +2004,15 @@ class JobRunner:
             if self._run_status(run_id) == "cancelled":
                 return False
             proc, pid, starttime = self._spawn(spec)
+            self._procs[run_id] = proc
             self._record_pid(job_id, pid, starttime)
         else:
             job_id = self._active_job_id(run_id, spec.stage)
             proc, (pid, starttime) = None, inherited
-        exit_code = await self._monitor(pid, starttime, proc)
+        try:
+            exit_code = await self._monitor(pid, starttime, proc)
+        finally:
+            self._procs.pop(run_id, None)
         if self._run_status(run_id) == "cancelled":
             return False
         if spec.stage == "build" and exit_code in (0, None):
@@ -2008,6 +2033,7 @@ class JobRunner:
         while True:
             async with self._claim_lock:
                 if self._run_status(run_id) == "cancelled":
+                    self._cancel_job(job_id)  # otherwise active-jobs would report this row forever
                     return
                 if self._has_capacity(stage):
                     s = self._sf()
@@ -2036,7 +2062,7 @@ class JobRunner:
 
     def _spawn(self, spec: StageSpec) -> tuple[subprocess.Popen, int, int | None]:
         spec.cwd.mkdir(parents=True, exist_ok=True)
-        log = open(spec.log_path, "ab")  # the child owns this descriptor; closing ours is fine after spawn
+        log = open(spec.stdout_path, "ab")  # the child owns this descriptor; closing ours is fine after spawn
         try:
             proc = subprocess.Popen(spec.argv, cwd=str(spec.cwd), env=spec.env, stdout=log, stderr=subprocess.STDOUT,
                                     stdin=subprocess.DEVNULL, start_new_session=True)
@@ -2073,6 +2099,12 @@ class JobRunner:
         for pid, st in pids:
             if is_alive(pid, st):
                 await asyncio.to_thread(killpg_graceful, pid, self._grace)
+        proc = self._procs.pop(run_id, None)
+        if proc is not None:  # reap, so the pid is not left as a zombie
+            try:
+                await asyncio.to_thread(proc.wait, 5)
+            except subprocess.TimeoutExpired:
+                logger.warning("process %s of run %s did not exit after SIGKILL", proc.pid, run_id)
         task = self._tasks.get(run_id)
         if task is not None:
             task.cancel()
@@ -2125,6 +2157,13 @@ class JobRunner:
         s = self._sf()
         try:
             job = s.get(Job, job_id); job.pid = pid; job.proc_starttime = starttime; s.commit()
+        finally:
+            s.close()
+
+    def _cancel_job(self, job_id: int) -> None:
+        s = self._sf()
+        try:
+            job = s.get(Job, job_id); job.status = "cancelled"; job.finished_at = utcnow(); s.commit()
         finally:
             s.close()
 
@@ -2570,7 +2609,7 @@ from tests.fake_template import FakeTemplate
 @pytest.fixture
 def world(db, tmp_path, runner):
     from sfincs_ui.config import get_config
-    cfg = get_config()  # set by the runner fixture: max_simulations=1, max_threads=4, fake binary
+    cfg = get_config()  # set by the runner fixture: max_simulations=1, max_threads=4, min_free_gb=10, fake binary
     auth = AuthService(session_factory=db)
     admin, _ = auth.ensure_admin("root", "pw12345678")
     alice = auth.create_user("alice", "pw12345678")
@@ -2611,8 +2650,8 @@ def test_launch_refusals(world, monkeypatch):
         runs.launch(world["bob"], pid, "x", 1)
     with pytest.raises(NotAllowed):
         runs.launch(None, pid, "x", 1)
-    monkeypatch.setattr(rs, "free_space_gb", lambda path: 12.5)
-    with pytest.raises(LaunchRefused, match="12.5 GB free.*100 GB"):
+    monkeypatch.setattr(rs, "free_space_gb", lambda path: 2.5)
+    with pytest.raises(LaunchRefused, match="2.5 GB free.*10 GB"):
         runs.launch(alice, pid, "x", 1)
 
 
@@ -3299,8 +3338,8 @@ In `deploy/deploy_ui.sh`:
 # keeps it alive across a restart and the queue reconciles it at startup, so a
 # restart is safe; we warn so the operator knows a run is in flight.
 warn_if_simulating() {
-    local out rc
-    out="$(as_shiny active-jobs 2>/dev/null)"; rc=$?
+    local out rc=0
+    out="$(as_shiny active-jobs 2>/dev/null)" || rc=$?   # exit 1 = alive simulation; errexit must not fire here
     if [[ $rc -eq 1 ]]; then
         warn "a simulation is running; restarting anyway (KillMode=process keeps it alive, the queue reconciles it):"
         echo "$out" | sed 's/^/      /'
@@ -3310,7 +3349,7 @@ warn_if_simulating() {
 wait_for_simulations() {  # --wait: poll up to 90 minutes
     local rc
     for _ in $(seq 1 180); do
-        as_shiny active-jobs >/dev/null 2>&1; rc=$?
+        rc=0; as_shiny active-jobs >/dev/null 2>&1 || rc=$?
         [[ $rc -ne 1 ]] && return 0
         info "a simulation is running; waiting 30 s (--wait)"
         sleep 30
@@ -4047,8 +4086,7 @@ async def test_examples_seeded_and_pages_present(app):
         r = await c.get("/")
         assert r.status_code == 200
         for panel in ("Projects", "Setup", "Runs", "Admin"):
-            assert panel in r.text
-        assert "Fake example" in r.text
+            assert panel in r.text  # nav titles are static; the examples list is a server render, asserted above
 
 
 async def test_lifespan_starts_and_stops_the_runner(app):
@@ -4317,7 +4355,7 @@ Measure once, by hand, how long a finer plane beach takes with the real binary s
 S=/tmp/claude-1000/-home-razinka-sfincs/946ef2e3-64b8-42c9-b324-8e8da9f13c98/scratchpad/pb
 for res in 10 5; do mkdir -p $S/$res && echo "{\"resolution_m\": $res, \"duration_hours\": 6, \"boundary_level_m\": 2.0, \"manning\": 0.04}" > $S/$res/settings.json \
  && /opt/micromamba/envs/shiny/bin/python -P sfincs_ui/templates/plane_beach_build.py --run-dir $S/$res --settings $S/$res/settings.json \
- && (cd $S/$res && /usr/bin/time -f "$res m: %e s" env OMP_NUM_THREADS=4 /home/razinka/sfincs/sfincs-linux/bin/sfincs > /dev/null); done
+ && (cd $S/$res && SECONDS=0 && OMP_NUM_THREADS=4 /home/razinka/sfincs/sfincs-linux/bin/sfincs > /dev/null; echo "$res m: $SECONDS s"); done
 ```
 
 Record both durations in `sfincs_ui/README.md` under a new "Acceptance: restart during a run" section:
