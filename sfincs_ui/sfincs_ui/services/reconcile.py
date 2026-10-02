@@ -6,8 +6,8 @@ import json
 import logging
 from pathlib import Path
 
-from sfincs_ui.models import ACTIVE_JOB_STATUSES, RUN_STATUSES, Job, Project, Run
-from sfincs_ui.services.job_runner import SUMMARY_TAIL, JobRunner, build_evidence, evidence_for
+from sfincs_ui.models import ACTIVE_JOB_STATUSES, Project, Run
+from sfincs_ui.services.job_runner import SUMMARY_TAIL, JobRunner, evidence_for
 from sfincs_ui.services.model_service import read_settings, write_overrides
 from sfincs_ui.services.procs import is_alive
 from sfincs_ui.services.progress import tail_lines
@@ -31,13 +31,20 @@ def reconcile(runner: JobRunner) -> list[dict]:
                 decisions.append({"run_id": run.id, "stage": None, "decision": "requeued"})
                 continue
             if not active:
-                _fail(run, run.status, "interrupted", "", s)
+                _fail(run, run.status, "interrupted", "")
                 decisions.append({"run_id": run.id, "stage": None, "decision": "interrupted"})
                 continue
+            for stale in active[:-1]:
+                stale.status = "failed"; stale.finished_at = utcnow()
             job = active[-1]
             if not run_dir.is_dir() or template is None:
                 job.status = "orphaned"; job.finished_at = utcnow(); run.status = "orphaned"; run.finished_at = utcnow()
                 decisions.append({"run_id": run.id, "stage": job.stage, "decision": "orphaned"})
+                continue
+            if not job.pid:
+                # queued (waiting for capacity) or claimed-but-not-spawned: no process ever existed.
+                job.status = "cancelled"; job.finished_at = utcnow()
+                decisions.append({"run_id": run.id, "stage": job.stage, "decision": "requeued"})
                 continue
             if job.pid and job.proc_starttime is not None and is_alive(job.pid, job.proc_starttime):
                 decisions.append({"run_id": run.id, "stage": job.stage, "decision": "resumed", "_inherit": (job.pid, job.proc_starttime)})
@@ -51,7 +58,7 @@ def reconcile(runner: JobRunner) -> list[dict]:
             elif evidence():
                 decision = "completed"
             else:
-                _fail(run, job.stage, "interrupted", tail_lines(Path(job.log_path), SUMMARY_TAIL), s)
+                _fail(run, job.stage, "interrupted", tail_lines(Path(job.log_path), SUMMARY_TAIL))
                 job.status = "failed"; job.finished_at = utcnow()
                 decisions.append({"run_id": run.id, "stage": job.stage, "decision": "interrupted"})
                 continue
@@ -63,14 +70,20 @@ def reconcile(runner: JobRunner) -> list[dict]:
 
     # Start the chains only after the rows are committed.
     for d in decisions:
-        if d["decision"] == "requeued":
-            runner.submit(d["run_id"])
-        elif d["decision"] == "resumed":
-            index = _stage_index(runner, d["run_id"], d["stage"])
-            runner.resume(d["run_id"], index, d.pop("_inherit"))
-        elif d["decision"] in ("completed", "overrides_reapplied"):
-            index = _stage_index(runner, d["run_id"], d["stage"])
-            runner.resume(d["run_id"], index + 1, None)
+        try:
+            if d["decision"] == "requeued":
+                if d["stage"] is None:
+                    runner.submit(d["run_id"])
+                else:
+                    runner.resume(d["run_id"], _stage_index(runner, d["run_id"], d["stage"]), None)
+            elif d["decision"] == "resumed":
+                runner.resume(d["run_id"], _stage_index(runner, d["run_id"], d["stage"]), d.pop("_inherit"))
+            elif d["decision"] in ("completed", "overrides_reapplied"):
+                runner.resume(d["run_id"], _stage_index(runner, d["run_id"], d["stage"]) + 1, None)
+        except Exception as exc:
+            logger.exception("reconcile: cannot continue run %s", d["run_id"])
+            _fail_run_by_id(runner, d["run_id"], d["stage"] or "plan", f"cannot plan stages: {exc}")
+            d["decision"] = "failed"
     for d in decisions:
         d.pop("_inherit", None)
         logger.info("reconcile: run %s stage %s -> %s", d["run_id"], d["stage"], d["decision"])
@@ -81,6 +94,17 @@ def _stage_index(runner: JobRunner, run_id: str, stage: str) -> int:
     return [spec.stage for spec in runner.plan_stages(run_id)].index(stage)
 
 
-def _fail(run: Run, stage: str, reason: str, log_tail: str, session) -> None:
+def _fail(run: Run, stage: str, reason: str, log_tail: str) -> None:
     run.status = "failed"; run.finished_at = utcnow()
     run.summary_json = json.dumps({"stage": stage, "reason": reason, "exit_code": None, "log_tail": log_tail})
+
+
+def _fail_run_by_id(runner: JobRunner, run_id: str, stage: str, reason: str) -> None:
+    s = runner._sf()
+    try:
+        run = s.get(Run, run_id)
+        if run is not None and run.status not in ("finished", "failed", "cancelled", "orphaned"):
+            _fail(run, stage, reason, "")
+            s.commit()
+    finally:
+        s.close()

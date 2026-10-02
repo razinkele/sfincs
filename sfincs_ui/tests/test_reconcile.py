@@ -1,11 +1,7 @@
-import asyncio
-import json
 import os
 import signal
 import subprocess
-import sys
 
-import pytest
 
 from sfincs_ui.models import Job, Run
 from sfincs_ui.services.procs import proc_starttime
@@ -140,9 +136,53 @@ async def test_start_runs_the_reconciler(db, tmp_path):
 
 def test_reconcile_never_inherits_without_a_start_time(runner, db, tmp_path):
     """A row with a pid but no recorded start time could be any recycled process: treat it as dead."""
-    import os
     run_id = make_run(db, tmp_path, "fake", S)
     _set(db, run_id, run_status="running", jobs=[("build", "completed", 1, 1), ("simulate", "running", os.getpid(), None)])
     decisions = reconcile(runner)
     assert decisions == [{"run_id": run_id, "stage": "simulate", "decision": "interrupted"}]
     assert run_row(db, run_id)["status"] == "failed"
+
+
+async def test_reconcile_requeues_a_queued_job_waiting_for_capacity(runner, db, tmp_path):
+    """A restart while a run waited for a simulate slot must not fail it: the stage is re-run."""
+    run_id = make_run(db, tmp_path, "fake", S)
+    wd = run_row(db, run_id)["workdir"]
+    _built(wd)
+    from sfincs_ui.services.model_service import write_overrides
+    write_overrides(wd, {"alpha": "0.7"})
+    _set(db, run_id, run_status="building", jobs=[("build", "completed", 1, 1), ("simulate", "queued", None, None)])
+    decisions = reconcile(runner)
+    assert decisions == [{"run_id": run_id, "stage": "simulate", "decision": "requeued"}]
+    await runner.wait(run_id, timeout=20)
+    row = run_row(db, run_id)
+    assert row["status"] == "finished"
+    assert [(j["stage"], j["status"]) for j in row["jobs"]] == [("build", "completed"), ("simulate", "cancelled"), ("simulate", "completed")]
+
+
+async def test_reconcile_requeues_a_claimed_but_unspawned_build(runner, db, tmp_path):
+    run_id = make_run(db, tmp_path, "fake", S)
+    _set(db, run_id, run_status="building", jobs=[("build", "running", None, None)])
+    decisions = reconcile(runner)
+    assert decisions == [{"run_id": run_id, "stage": "build", "decision": "requeued"}]
+    await runner.wait(run_id, timeout=20)
+    assert run_row(db, run_id)["status"] == "finished"
+
+
+def test_reconcile_closes_stale_duplicate_active_rows(runner, db, tmp_path):
+    run_id = make_run(db, tmp_path, "fake", S)
+    _set(db, run_id, run_status="running", jobs=[("simulate", "running", 2**22 - 2, 123), ("simulate", "running", 2**22 - 3, 124)])
+    reconcile(runner)
+    statuses = [j["status"] for j in run_row(db, run_id)["jobs"]]
+    assert statuses == ["failed", "failed"]  # the stale older row and the interrupted newest one
+
+
+async def test_reconcile_planning_failure_fails_only_that_run(runner, db, tmp_path):
+    good = make_run(db, tmp_path, "fake", S, name="good")
+    bad = make_run(db, tmp_path, "fake", S, name="bad")
+    (run_row(db, bad)["workdir"] / "settings.json").write_text("{not json")
+    _set(db, bad, run_status="building", jobs=[("build", "queued", None, None)])
+    decisions = {d["run_id"]: d["decision"] for d in reconcile(runner)}
+    assert decisions[good] == "requeued" and decisions[bad] == "failed"
+    row = run_row(db, bad)
+    assert row["status"] == "failed" and "cannot plan stages" in row["summary"]["reason"]
+    await runner.wait(good, timeout=20)
