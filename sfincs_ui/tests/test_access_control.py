@@ -26,7 +26,7 @@ def test_can_view_run_matrix(user, run, expected):
     (OWNER, _run(), True), (ADMIN, _run(), True), (ADMIN, _run(baseline=True), False), (OWNER, _run(baseline=True), False),
 ])
 def test_can_modify_run_matrix(user, run, expected):
-    """Review Focus 5: only the owner or an admin may act on a run; baselines never."""
+    """Only the owner or an admin may act on a run; baselines never."""
     assert ac.can_modify_run(user, run) is expected
 
 
@@ -54,3 +54,49 @@ def test_require_helpers_raise_not_allowed():
 def test_inactive_user_has_no_rights():
     inactive = {**OWNER, "is_active": False}
     assert not ac.can_modify_run(inactive, _run()) and not ac.can_view_run(inactive, _run())
+
+
+@pytest.mark.parametrize("flag,expected", [(True, True), (1, True), (None, False), (0, False), (False, False)])
+def test_is_active_values_fail_closed(flag, expected):
+    user = {**OWNER, "is_active": flag}
+    assert ac.can_modify_run(user, _run()) is expected
+    assert ac.can_view_run(user, _run()) is expected
+
+
+def test_absent_is_active_means_active():
+    user = {k: v for k, v in OWNER.items() if k != "is_active"}
+    assert ac.can_modify_run(user, _run()) is True
+
+
+@pytest.mark.parametrize("user", [{"role": "user", "is_active": True}, {"id": None, "role": "user", "is_active": True}])
+def test_nameless_user_never_matches_an_unowned_resource(user):
+    assert not ac.can_view_run(user, _run(owner_id=None))
+    assert not ac.can_modify_run(user, _run(owner_id=None))
+    assert not ac.can_modify_project(user, {"id": "e", "owner_id": None})
+
+
+def test_inactive_admin_has_no_rights():
+    inactive_admin = {**ADMIN, "is_active": False}
+    assert not ac.is_admin(inactive_admin)
+    assert not ac.can_modify_run(inactive_admin, _run())
+    assert not ac.can_modify_project(inactive_admin, {"id": "e", "owner_id": None})
+    assert not ac.can_use_project(inactive_admin, {"id": "e", "owner_id": None})
+    assert ac.can_view_run(inactive_admin, _run(baseline=True))  # baselines are public to everyone
+
+
+@pytest.mark.parametrize("user,project,expected", [
+    (OWNER, {"id": "p", "owner_id": 2}, True), (OTHER, {"id": "p", "owner_id": 2}, False),
+    (ADMIN, {"id": "e", "owner_id": None}, True), (OWNER, {"id": "e", "owner_id": None}, False), (None, {"id": "e", "owner_id": None}, False),
+])
+def test_can_modify_project_matrix(user, project, expected):
+    assert ac.can_modify_project(user, project) is expected
+
+
+def test_require_project_helpers():
+    system = {"id": "e", "owner_id": None}
+    with pytest.raises(NotAllowed):
+        ac.require_modify_project(OWNER, system)
+    ac.require_modify_project(ADMIN, system)
+    with pytest.raises(NotAllowed):
+        ac.require_use_project(None, system)
+    ac.require_use_project(OTHER, system)

@@ -16,7 +16,8 @@ from sfincs_ui.models.user import ROLE_ADMIN
 
 
 def _active(user: dict | None) -> bool:
-    return bool(user) and user.get("is_active", True) is not False
+    # Absent means active (service dicts always carry the key); None, 0 and False mean inactive.
+    return bool(user) and bool(user.get("is_active", True))
 
 
 def is_admin(user: dict | None) -> bool:
