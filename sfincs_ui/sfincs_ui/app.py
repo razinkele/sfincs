@@ -98,10 +98,10 @@ def build_server(config: Config, auth_service: AuthService, audit_service: Audit
             user = current_user()
             prefix = config.url_prefix
             if user is None:
-                return ui.tags.a("Log in", href=f"{prefix}/login", class_="btn btn-sm btn-outline-light")
+                return ui.tags.a("Log in", href=f"{prefix}/login", class_="btn btn-sm btn-outline-secondary")
             return ui.span(
-                ui.span(user["username"], class_="me-2 text-light"),
-                ui.tags.a("Log out", href=f"{prefix}/logout", class_="btn btn-sm btn-outline-light"),
+                ui.span(user["username"], class_="me-2"),
+                ui.tags.a("Log out", href=f"{prefix}/logout", class_="btn btn-sm btn-outline-secondary"),
             )
 
         home.home_server("home", current_user=current_user)
