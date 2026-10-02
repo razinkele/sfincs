@@ -4,6 +4,7 @@ example projects."""
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,9 @@ Kind = Literal["int", "float", "choice", "bool"]
 
 @dataclass(frozen=True)
 class SettingField:
+    _TRUE = ("1", "true", "yes", "on")
+    _FALSE = ("0", "false", "no", "off")
+
     key: str
     label: str
     kind: Kind
@@ -30,16 +34,30 @@ class SettingField:
     def coerce(self, raw: Any) -> Any:
         try:
             if self.kind == "bool":
-                if isinstance(raw, str):
-                    return raw.strip().lower() in ("1", "true", "yes", "on")
-                return bool(raw)
+                if isinstance(raw, bool):
+                    return raw
+                if isinstance(raw, (int, float)) and raw in (0, 1):
+                    return bool(raw)
+                text = str(raw).strip().lower()
+                if text in self._TRUE:
+                    return True
+                if text in self._FALSE:
+                    return False
+                raise TemplateError(f"{self.key}: expected true or false")
             if self.kind == "int":
-                value: Any = int(float(raw))
+                number = float(raw)
+                if not math.isfinite(number) or number != int(number):
+                    raise TemplateError(f"{self.key}: must be a whole number")
+                value: Any = int(number)
             elif self.kind == "float":
                 value = float(raw)
+                if not math.isfinite(value):
+                    raise TemplateError(f"{self.key}: must be a finite number")
             else:  # choice: compare as the type of the first choice
                 value = type(self.choices[0])(raw)
-        except (TypeError, ValueError) as exc:
+        except TemplateError:
+            raise
+        except (TypeError, ValueError, OverflowError) as exc:
             raise TemplateError(f"{self.key}: not a valid {self.kind}") from exc
         if self.kind == "choice" and value not in self.choices:
             raise TemplateError(f"{self.key}: must be one of {', '.join(map(str, self.choices))}")

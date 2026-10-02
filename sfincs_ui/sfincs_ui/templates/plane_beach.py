@@ -11,7 +11,6 @@ from sfincs_ui.templates.base import SettingField, Template
 
 DOMAIN_X_M, DOMAIN_Y_M = 5000.0, 2000.0
 STATIONS = (("offshore", 1050.0, 1050.0), ("shoreline", 2550.0, 1050.0), ("inland", 3250.0, 1050.0))
-OVERRIDE_KEYS = ("alpha", "huthresh", "advection")
 
 
 class PlaneBeachTemplate(Template):

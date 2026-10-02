@@ -66,3 +66,9 @@ def test_builder_has_no_package_imports():
     src = Path(plane_beach_build.__file__).read_text()
     assert "sfincs_ui" not in src.replace("sfincs_ui/", "")  # the only allowed mention is in a path comment
     assert "import numpy" in src
+
+
+def test_builder_24h_stop_is_next_midnight(tmp_path):
+    proc = _build(tmp_path / "run", {**DEFAULTS, "duration_hours": 24})
+    assert proc.returncode == 0, proc.stderr
+    assert "tstop           = 20240102 000000" in (tmp_path / "run" / "sfincs.inp").read_text()

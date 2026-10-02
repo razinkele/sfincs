@@ -65,3 +65,17 @@ def test_overrides_validation_export_and_evidence(tpl, tmp_path):
     assert tpl.example_projects()[0][0] == "Plane beach example"
     layers = tpl.geometry_layers(tmp_path, tpl.defaults())
     assert {l["name"] for l in layers} == {"domain", "boundary", "stations"}
+
+
+def test_coerce_edge_cases(tpl):
+    with pytest.raises(TemplateError, match="advection"):
+        tpl.validate({**tpl.defaults(), "advection": "maybe"})
+    assert tpl.validate({**tpl.defaults(), "advection": "False"})["advection"] is False
+    assert tpl.validate({**tpl.defaults(), "advection": 1})["advection"] is True
+    with pytest.raises(TemplateError, match="whole number"):
+        tpl.validate({**tpl.defaults(), "duration_hours": "3.7"})
+    assert tpl.validate({**tpl.defaults(), "duration_hours": "3.0"})["duration_hours"] == 3
+    with pytest.raises(TemplateError, match="finite"):
+        tpl.validate({**tpl.defaults(), "alpha": float("nan")})
+    with pytest.raises(TemplateError, match="duration_hours"):
+        tpl.validate({**tpl.defaults(), "duration_hours": float("inf")})

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -46,6 +47,7 @@ def write_model(run_dir: Path, s: dict) -> None:
     dx = dy = float(s["resolution_m"])
     mmax, nmax = int(DOMAIN_X_M / dx), int(DOMAIN_Y_M / dy)
     tstop_s = s["duration_hours"] * 3600
+    tstop = (datetime(2024, 1, 1) + timedelta(seconds=tstop_s)).strftime("%Y%m%d %H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
     x_centres = (np.arange(mmax) + 0.5) * dx
@@ -76,7 +78,7 @@ rotation        = 0
 
 tref            = 20240101 000000
 tstart          = 20240101 000000
-tstop           = 20240101 {s['duration_hours']:02d}0000
+tstop           = {tstop}
 
 inputformat     = asc
 outputformat    = net
