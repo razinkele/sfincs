@@ -49,3 +49,16 @@ def db(tmp_path, monkeypatch):
     base.init_db()
     yield base.get_session_factory()
     base.reset_engine()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _fast_argon2():
+    """Cheap argon2 parameters for the suite; production keeps the library defaults."""
+    from argon2 import PasswordHasher
+
+    from sfincs_ui.services import auth_service
+
+    cheap = PasswordHasher(time_cost=1, memory_cost=8 * 1024, parallelism=1)
+    auth_service._ph = cheap
+    auth_service._DUMMY_HASH = cheap.hash("x")
+    yield
