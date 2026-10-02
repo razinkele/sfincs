@@ -1,0 +1,34 @@
+# /etc/systemd/system/sfincs-ui.service -- SFINCS UI on laguna.ku.lt.
+# Installed by deploy/deploy_ui.sh from deploy/sfincs-ui.service.in; do not edit here.
+#
+# Standalone uvicorn as user shiny, nginx proxies /sfincs-ui/ to it. Not Shiny
+# Server: that reaps an app a few seconds after its last client leaves and
+# restarts it on every deploy, the wrong lifetime for hour-long model runs.
+#
+# KillMode=process: `man systemd.kill` calls this "not recommended" because
+# children of the main process survive a stop. That is the point here. Every
+# model stage (build, simulate, validate, export) is launched detached in its
+# own session and recorded in the jobs table with its pid and /proc start
+# time; on the next start the queue reconciles it (spec section 3). With the
+# default control-group mode a `systemctl restart` on deploy would SIGKILL a
+# 45-minute SFINCS run. TimeoutStopSec therefore applies to uvicorn alone.
+
+[Unit]
+Description=SFINCS UI (Python Shiny, direct uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=shiny
+Group=shiny
+WorkingDirectory=@PROD_SRC@/sfincs_ui
+EnvironmentFile=/etc/sfincs-ui.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/micromamba/envs/shiny/bin/python3 -m uvicorn sfincs_ui.asgi:app --host 127.0.0.1 --port @PORT@ --root-path @URL_PREFIX@
+Restart=always
+RestartSec=5
+KillMode=process
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

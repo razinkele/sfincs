@@ -1,0 +1,13 @@
+{
+  "id": "sfincs-ui",
+  "title": "SFINCS UI",
+  "path": "/sfincs-ui/",
+  "description": "Build, run and inspect SFINCS compound-flood models of the Curonian Lagoon from the browser. Login required to launch runs; published runs are open to everyone.",
+  "icon": "model",
+  "tag": "Shiny",
+  "tagClass": "shiny",
+  "language": "Python",
+  "visible": false,
+  "order": 14,
+  "svg": "<svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M3 12l4-5 4 4 3-3 7 6\"/><path d=\"M2 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0\"/><circle cx=\"18\" cy=\"6\" r=\"2.5\"/></svg>"
+}

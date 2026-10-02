@@ -121,3 +121,34 @@ tail -n 40 /var/log/shiny-server/sfincs-*.log
 
 A 500 with an empty page usually means the `python` directive is missing from
 the Shiny Server block — without it the app is treated as an R app.
+
+## SFINCS UI (`/sfincs-ui/`)
+
+The build-and-run app (`sfincs_ui/`) is a separate deployment from the
+viewer: a standalone uvicorn systemd unit `sfincs-ui` on port 8840 behind
+nginx, in the osmose pattern, because hour-long model runs must survive
+deploys and idle browsers (spec section 5).
+
+```bash
+sudo bash deploy/deploy_ui.sh              # install or update
+bash deploy/deploy_ui.sh --check           # state only, no root
+sudo bash deploy/deploy_ui.sh --restart
+sudo bash deploy/deploy_ui.sh --uninstall  # keeps /srv/sfincs-ui/workspace
+```
+
+| Target | Change | Backup |
+|---|---|---|
+| `/srv/shiny-server/sfincs-ui-src` | prod clone of this repo at `origin/main`, pip-installed editable into the shiny env | replaced by fetch |
+| `/srv/sfincs-ui/workspace` | database and run directories, owned by `shiny` | kept on uninstall |
+| `/etc/sfincs-ui.env` | SFINCS_UI_* ceilings, MAMBA_ROOT_PREFIX, SFINCS_CURONIAN_DB | `.bak.<stamp>` |
+| `/etc/systemd/system/sfincs-ui.service` | unit with `KillMode=process` | replaced |
+| `/etc/nginx/sites-available/nid4ocean` | `location /sfincs-ui/` before "Database Admin Tools" | `.bak.<stamp>` |
+| `/var/www/html/services.json` | catalogue entry `sfincs-ui`, visible after the smoke test | `.bak-<stamp>` |
+
+Order: deployer preflight and port refusals, clone, pip install, workspace
+and env file, preflight as `shiny`, migrate and `create-admin` as `shiny`
+(password prompted, or `SFINCS_UI_ADMIN_PASSWORD` in the environment of the
+sudo call), unit restart and local HTTP 200, nginx insert and reload, HTTPS
+smoke test of `/` and `/login`, catalogue made visible.
+
+Re-running is idempotent; `create-admin` does nothing when an admin exists.
