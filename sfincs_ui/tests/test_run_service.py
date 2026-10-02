@@ -131,3 +131,19 @@ def test_launch_failure_before_submit_leaves_no_row(world, monkeypatch):
         world["runs"].launch(world["alice"], world["project"]["id"], "x", 1)
     assert world["runs"].list_for(world["alice"]) == []
     world["projects"].delete(world["alice"], world["project"]["id"])  # must not be blocked by a phantom active run
+
+
+async def test_launch_on_an_example_requires_modify_rights(world, runner):
+    """An example belongs to nobody: a user clones it first; an administrator may launch on it."""
+    world["projects"].ensure_examples()
+    example = world["projects"].examples()[0]
+    assert example["owner_id"] is None
+    with pytest.raises(NotAllowed, match="Clone the example into your projects first"):
+        world["runs"].launch(world["alice"], example["id"], "x", 1)
+    await runner.start()
+    mine = world["runs"].launch(world["alice"], world["project"]["id"], "mine", 1)
+    admin_run = world["runs"].launch(world["admin"], example["id"], "admin", 1)
+    await runner.wait(mine["id"], timeout=20)
+    await runner.wait(admin_run["id"], timeout=20)
+    assert world["runs"].get(world["admin"], admin_run["id"])["status"] == "finished"
+    assert world["runs"].get(world["alice"], mine["id"])["status"] == "finished"

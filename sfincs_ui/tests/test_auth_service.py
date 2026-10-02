@@ -117,3 +117,31 @@ def test_delete_user_removes_sessions_and_tokens(auth, db):
         assert s.query(WSAuthToken).count() == 0
     finally:
         s.close()
+
+
+def test_delete_user_refused_while_they_own_an_active_run(auth, db, tmp_path):
+    """Deleting the owner would cascade away live run and job rows while the solver keeps running."""
+    from sfincs_ui.models import Project, Run
+    from tests.runner_helpers import make_run
+
+    u = auth.create_user("ivy", "pw12345678")
+    run_id = make_run(db, tmp_path, "fake", {"alpha": 0.7}, owner_id=u["id"])
+    s = db()
+    try:
+        run = s.get(Run, run_id); run.status = "running"; project_id = run.project_id; s.commit()
+    finally:
+        s.close()
+    with pytest.raises(ValueError, match="active run"):
+        auth.delete_user(u["id"])
+    s = db()
+    try:
+        assert s.get(Run, run_id) is not None
+        s.get(Run, run_id).status = "finished"; s.commit()
+    finally:
+        s.close()
+    assert auth.delete_user(u["id"]) is True
+    s = db()
+    try:
+        assert s.get(Project, project_id) is None and s.get(Run, run_id) is None
+    finally:
+        s.close()

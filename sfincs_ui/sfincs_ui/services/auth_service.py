@@ -202,7 +202,8 @@ class AuthService:
             True if the user was found and deleted, False if not found.
 
         Raises:
-            ValueError: If attempting to delete the last admin user.
+            ValueError: If attempting to delete the last admin user, or a
+                user who owns a run that is still queued or in progress.
         """
         session = self._session_factory()
         try:
@@ -218,6 +219,21 @@ class AuthService:
                 )
                 if admin_count <= 1:
                     raise ValueError("Cannot delete the last admin user")
+            # Projects, runs and job rows cascade with the user; a live solver would
+            # keep running with no row left to monitor, cancel or reconcile it.
+            from sfincs_ui.models import Project, Run
+
+            active_runs = (
+                session.query(Run)
+                .join(Project, Run.project_id == Project.id)
+                .filter(
+                    Project.owner_id == user_id,
+                    Run.status.in_(("queued", "building", "running", "validating", "exporting")),
+                )
+                .count()
+            )
+            if active_runs:
+                raise ValueError("Cannot delete a user with an active run; cancel it first")
             # Sessions go through the FK cascade; WS tokens have no relationship
             # and are deleted explicitly.
             session.query(WSAuthToken).filter_by(user_id=user_id).delete()

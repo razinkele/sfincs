@@ -80,6 +80,10 @@ class RunService:
     def launch(self, user: dict | None, project_id: str, name: str, threads: int) -> dict:
         ac.require_user(user)
         project = self._projects.get(user, project_id)  # require_use_project
+        if not ac.can_modify_project(user, project):  # a run writes into the project's directory
+            if project["owner_id"] is None:
+                raise NotAllowed("Clone the example into your projects first")
+            ac.require_modify_project(user, project)
         name = (name or "").strip()
         if not name or len(name) > MAX_NAME:
             raise LaunchRefused(f"Run name must be 1-{MAX_NAME} characters")
