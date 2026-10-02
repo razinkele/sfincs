@@ -39,6 +39,7 @@ built on; a different machine needs those four sources and an edit there.
 | `test_model_hydromt/` | Same test case built via HydroMT-SFINCS |
 | `hydromt-sfincs*.yml`, `hydromt-sfincs.sitecustomize.py` | Model-builder env spec, lock, and zlib fix |
 | `mcp/meteo-lt/` | Local MCP server over LHMT's open data API, see below |
+| `sfincs_ui/` | Build-and-run web app (login, projects, runs); milestone 1 shipped, see `sfincs_ui/README.md` |
 
 ## Running a model
 
