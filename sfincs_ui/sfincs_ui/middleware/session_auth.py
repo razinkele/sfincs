@@ -1,9 +1,9 @@
 """Cookie-session middleware for the SFINCS UI ASGI app.
 
 Reads the ``sfincs_ui_session`` cookie, resolves it through AuthService and
-publishes the user (or None) to the request through a contextvar. Unlike the
-SHYFEM UI original this never redirects: anonymous visitors reach every page
-with ``user=None`` and the pages decide what they may see (spec section 5).
+publishes the user (or None) to the request through a contextvar. This
+middleware never redirects: anonymous visitors reach every page with
+``user=None`` and the pages decide what they may see (spec section 5).
 The middleware owns /login, /logout and /api/whoami; the last one also mints
 the websocket token that bridges the HTTP identity into the Shiny session.
 """
