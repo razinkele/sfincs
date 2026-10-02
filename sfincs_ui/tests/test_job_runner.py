@@ -1,7 +1,4 @@
 import asyncio
-import os
-
-import pytest
 
 from sfincs_ui.services.procs import is_alive, proc_starttime
 from tests.runner_helpers import make_run, run_row
@@ -70,10 +67,11 @@ async def test_cancel_kills_the_process_and_marks_cancelled(runner, db, tmp_path
     while not any(j["stage"] == "simulate" and j["pid"] for j in run_row(db, run_id)["jobs"]):
         await asyncio.sleep(0.02)
     pid = next(j["pid"] for j in run_row(db, run_id)["jobs"] if j["stage"] == "simulate")
+    st = proc_starttime(pid)
     await runner.cancel(run_id)
     row = run_row(db, run_id)
     assert row["status"] == "cancelled" and row["jobs"][-1]["status"] == "cancelled"
-    assert proc_starttime(pid) is None or not is_alive(pid, None)
+    assert not is_alive(pid, st)
 
 
 async def test_task_cancellation_does_not_kill_the_child(runner, db, tmp_path, monkeypatch):
@@ -102,9 +100,11 @@ async def test_simulate_cap_is_respected_by_concurrent_chains(runner, db, tmp_pa
     await runner.start()
     runner.submit(a); runner.submit(b)
     peak = 0
+    deadline = asyncio.get_running_loop().time() + 30
     while not all(run_row(db, r)["status"] in ("finished", "failed") for r in (a, b)):
         running = sum(1 for r in (a, b) for j in run_row(db, r)["jobs"] if j["stage"] == "simulate" and j["status"] == "running")
         peak = max(peak, running)
+        assert asyncio.get_running_loop().time() < deadline, "runs did not finish"
         await asyncio.sleep(0.02)
     assert peak == 1
     assert run_row(db, a)["status"] == run_row(db, b)["status"] == "finished"
@@ -136,4 +136,21 @@ async def test_active_jobs_and_plan_stages(runner, db, tmp_path, monkeypatch):
     active = runner.active_jobs()
     assert len(active) == 1 and active[0]["stage"] == "simulate" and active[0]["run_id"] == run_id and active[0]["pid"]
     await runner.cancel(run_id)
+    assert runner.active_jobs() == []
+
+
+async def test_spawn_failure_releases_the_slot(runner, db, tmp_path):
+    """A missing binary must fail the run AND the job row, so the simulate slot is not held forever."""
+    from sfincs_ui import config
+    cfg = config.get_config()
+    config.set_config(cfg.model_copy(update={"sfincs_bin": tmp_path / "no-such-binary"}))
+    runner._config = config.get_config()
+    run_id = make_run(db, tmp_path, "fake", S)
+    await runner.start()
+    runner.submit(run_id)
+    await runner.wait(run_id, timeout=20)
+    row = run_row(db, run_id)
+    assert row["status"] == "failed" and row["summary"]["stage"] == "simulate"
+    assert "internal error" in row["summary"]["reason"]
+    assert row["jobs"][-1]["stage"] == "simulate" and row["jobs"][-1]["status"] == "failed"
     assert runner.active_jobs() == []

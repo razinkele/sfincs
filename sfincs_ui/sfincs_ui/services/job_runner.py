@@ -16,7 +16,6 @@ import logging
 import os
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -201,9 +200,13 @@ class JobRunner:
             await self._claim(run_id, job_id, spec.stage)
             if self._run_status(run_id) == "cancelled":
                 return False
-            proc, pid, starttime = self._spawn(spec)
-            self._procs[run_id] = proc
-            self._record_pid(job_id, pid, starttime)
+            try:
+                proc, pid, starttime = self._spawn(spec)
+                self._procs[run_id] = proc
+                self._record_pid(job_id, pid, starttime)
+            except Exception:
+                self._fail_job(job_id, None)  # release the capacity slot before the chain fails the run
+                raise
         else:
             job_id = self._active_job_id(run_id, spec.stage)
             proc, (pid, starttime) = None, inherited
@@ -287,15 +290,12 @@ class JobRunner:
             if run is None or run.status in ("finished", "failed", "cancelled", "orphaned"):
                 return
             run.status = "cancelled"; run.finished_at = utcnow()
-            active = [j for j in run.jobs if j.status in ACTIVE_JOB_STATUSES]
-            pids = [(j.pid, j.proc_starttime) for j in active if j.pid]
-            for j in active:
-                j.status = "cancelled"; j.finished_at = utcnow()
+            active = [(j.id, j.pid, j.proc_starttime) for j in run.jobs if j.status in ACTIVE_JOB_STATUSES]
             s.commit()
         finally:
             s.close()
-        for pid, st in pids:
-            if is_alive(pid, st):
+        for _jid, pid, st in active:
+            if pid and is_alive(pid, st):
                 await asyncio.to_thread(killpg_graceful, pid, self._grace)
         proc = self._procs.pop(run_id, None)
         if proc is not None:  # reap, so the pid is not left as a zombie
@@ -303,6 +303,15 @@ class JobRunner:
                 await asyncio.to_thread(proc.wait, 5)
             except subprocess.TimeoutExpired:
                 logger.warning("process %s of run %s did not exit after SIGKILL", proc.pid, run_id)
+        s = self._sf()  # free the capacity slots only now that the processes are gone
+        try:
+            for jid, _pid, _st in active:
+                job = s.get(Job, jid)
+                if job is not None:
+                    job.status = "cancelled"; job.finished_at = utcnow()
+            s.commit()
+        finally:
+            s.close()
         task = self._tasks.get(run_id)
         if task is not None:
             task.cancel()
