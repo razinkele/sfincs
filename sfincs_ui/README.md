@@ -78,10 +78,14 @@ The milestone 2 gate is a run that survives `systemctl restart sfincs-ui`.
 Measured on laguna with 4 threads: a 10 m plane beach takes about 62 s,
 a 5 m one about 540 s. Pick the resolution that gives you a few minutes:
 
-1. Log in, open the "Plane beach example" (Projects, Clone), set Cell size to 5 m, Save, Launch run with 4 threads.
+1. Log in. On the Projects page click "Clone into my projects" on the "Plane beach example" (the copy becomes the
+   active project). On the Setup page set Cell size to 5 m, Save, and Launch run with 4 threads.
 2. On the Runs page wait until the status is `running` and the progress bar moves.
 3. In a shell: `sudo bash deploy/deploy_ui.sh --restart`. The script warns that a simulation is running and restarts anyway.
-4. Reload the page, log in again if asked, select the run: the progress bar keeps moving and the run reaches `finished`
-   with `exit code unknown` on the simulate stage. `journalctl -u sfincs-ui -n 50` shows `reconcile: run … simulate -> resumed`;
+   (`sudo bash deploy/deploy_ui.sh --wait` is the blocking alternative: it waits for running simulations, then restarts.)
+4. Reload the page, log in again if asked, select the run: the progress bar keeps moving and the run reaches `finished`.
+   The simulate stage shows no exit code (its line reads `simulate: completed`): the restarted service did not spawn the
+   solver, so it cannot know the exit status, and the run's exit code is recorded as unknown.
+   `journalctl -u sfincs-ui -n 50` shows `reconcile: run … simulate -> resumed`;
    systemd also logs `Found left-over process … Ignoring`, which is expected with `KillMode=process`.
 5. Download `sfincs_his.nc` from the Runs page.

@@ -69,9 +69,15 @@ def build_server(config: Config, services: dict):
     auth_service = services["auth"]
 
     def server(input, output, session):
+        # The cookie seen when the websocket connected. Only the raw token is
+        # kept: the user behind it is re-read from the database on every call.
         session_token = get_current_session_token()
 
         def current_user() -> dict | None:
+            # Re-validated on every call (never cached) so logout, deactivation,
+            # demotion, password reset and deletion take effect on the next
+            # render or click of an already-open tab. The ws-token bridge comes
+            # first; under direct uvicorn the cookie also reaches the websocket.
             ws_token = input._wsauth() if "_wsauth" in input else None
             try:
                 return resolve_identity(ws_token, session_token, auth_service)
@@ -88,6 +94,10 @@ def build_server(config: Config, services: dict):
 
         @reactive.effect
         def _hide_admin_for_non_admins():
+            # Wait for the browser's whoami round trip (it always pushes
+            # `_wsauth`, empty for anonymous) so a real admin whose cookie
+            # has not been resolved yet never loses the tab. The Admin body
+            # gates itself too; this is presentation, not security.
             if "_wsauth" not in input:
                 return
             if not admin._check_admin_access(current_user()) and not hidden["admin"]:
