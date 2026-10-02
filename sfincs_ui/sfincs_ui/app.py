@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 _WS_IDENTITY_JS = """
 document.addEventListener('DOMContentLoaded', function () {
   fetch('api/whoami').then(function (r) { return r.json(); }).then(function (data) {
-    if (data.ws_token && window.Shiny && window.Shiny.setInputValue) {
-      window.Shiny.setInputValue('_wsauth', data.ws_token, {priority: 'event'});
+    if (window.Shiny && window.Shiny.setInputValue) {
+      window.Shiny.setInputValue('_wsauth', data.ws_token || '', {priority: 'event'});
     }
   }).catch(function () {});
 });
@@ -83,10 +83,12 @@ def build_server(config: Config, auth_service: AuthService, audit_service: Audit
 
         @reactive.effect
         def _hide_admin_for_non_admins():
-            # Under direct uvicorn the cookie reaches the websocket scope, so
-            # get_current_user() already names an admin at the first flush;
-            # the panel is removed once and only for everyone else. The Admin
-            # body gates itself too, so this is presentation, not security.
+            # Wait for the browser's whoami round trip (it always pushes
+            # `_wsauth`, empty for anonymous) so a real admin whose cookie
+            # has not been resolved yet never loses the tab. The Admin body
+            # gates itself too; this is presentation, not security.
+            if "_wsauth" not in input:
+                return
             if not admin._check_admin_access(current_user()) and not hidden["admin"]:
                 hidden["admin"] = True
                 ui.remove_nav_panel("main_nav", "Admin")

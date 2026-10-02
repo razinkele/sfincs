@@ -204,7 +204,14 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
             if len(pw) < 8:
                 ui.notification_show("Password must be at least 8 characters", type="error")
                 return
-            auth_service.reset_password(uid, pw)
+            try:
+                ok = auth_service.reset_password(uid, pw)
+            except ValueError as exc:
+                _notify_error(exc)
+                return
+            if not ok:
+                ui.notification_show("User not found", type="error")
+                return
             _audit("reset_password", target=f"user:{uid}")
             ui.modal_remove()
             ui.notification_show("Password reset", type="message")
