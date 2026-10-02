@@ -62,3 +62,27 @@ def _fast_argon2():
     auth_service._ph = cheap
     auth_service._DUMMY_HASH = cheap.hash("x")
     yield
+
+
+@pytest.fixture
+def runner(db, tmp_path):
+    """A JobRunner over the fake template with a fast poll; kills every spawned process group at teardown."""
+    import os
+    import signal
+
+    from sfincs_ui import config
+    from sfincs_ui.services.job_runner import JobRunner
+    from sfincs_ui.services.settings_service import SettingsService
+    from tests.fake_template import FAKE_SFINCS, FakeTemplate
+
+    cfg = config.Config(workspace=tmp_path, database_url=f"sqlite:///{tmp_path / 'test.db'}", sfincs_bin=FAKE_SFINCS,
+                        max_simulations=1, max_threads=4, min_free_gb=10)
+    config.set_config(cfg)
+    r = JobRunner(cfg, SettingsService(cfg, session_factory=db), session_factory=db,
+                  templates={"fake": FakeTemplate(), "fake_v": FakeTemplate(with_validation=True)}, poll_interval=0.05, grace_s=2.0)
+    yield r
+    for pid in list(r.spawned_pids):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
