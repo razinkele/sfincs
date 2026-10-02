@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 
 from shiny import module, reactive, render, ui
 
@@ -10,7 +9,6 @@ from sfincs_ui.exceptions import SfincsUiError
 from sfincs_ui.templates import get_template
 from sfincs_ui.templates.base import SettingField
 
-logger = logging.getLogger(__name__)
 
 
 def render_field(field: SettingField, value) -> ui.Tag:

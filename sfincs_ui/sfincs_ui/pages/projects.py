@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 
 from shiny import module, reactive, render, ui
 
 from sfincs_ui.exceptions import SfincsUiError
 from sfincs_ui.templates import TEMPLATES
 
-logger = logging.getLogger(__name__)
 
 
 @module.ui

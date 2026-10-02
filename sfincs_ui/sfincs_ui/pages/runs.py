@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
-import logging
 
 from shiny import module, reactive, render, ui
 
 from sfincs_ui.exceptions import SfincsUiError
-from sfincs_ui.models import ACTIVE_JOB_STATUSES
 from sfincs_ui.services import access_control as ac
 
-logger = logging.getLogger(__name__)
 _ACTIVE = ("queued", "building", "running", "validating", "exporting")
 _BADGE = {"finished": "bg-success", "failed": "bg-danger", "cancelled": "bg-dark", "orphaned": "bg-dark",
           "queued": "bg-secondary", "building": "bg-info", "running": "bg-warning text-dark", "validating": "bg-info", "exporting": "bg-info"}
@@ -50,7 +46,7 @@ def runs_ui() -> ui.Tag:
         ui.output_ui("detail"),
         ui.output_ui("progress"),
         ui.div(ui.output_ui("controls"), class_="mb-2"),
-        ui.download_button("download_his", "Download sfincs_his.nc", class_="btn-sm btn-outline-secondary mb-2"),
+        ui.output_ui("download_box"),
         ui.pre(ui.output_text("log_tail"), class_="small bg-body-tertiary p-2", style="max-height: 24rem; overflow: auto"),
         class_="container py-3",
     )
@@ -164,10 +160,13 @@ def runs_server(input, output, session, run_service, current_user, active_run):
 
     @render.ui
     def controls():
+        tick.get()
         r = _selected()
         user = current_user()
         if r is None or not ac.can_modify_run(user, {"owner_id": r["owner_id"], "public": r["public"]}):
             return None
+        if r["status"] in _ACTIVE:
+            reactive.invalidate_later(2)
         buttons = []
         if r["status"] in _ACTIVE:
             buttons.append(ui.input_action_button("cancel_btn", "Cancel", class_="btn-sm btn-outline-danger me-1"))
@@ -208,6 +207,18 @@ def runs_server(input, output, session, run_service, current_user, active_run):
             run_service.set_public(current_user(), r["id"], not r["public"]); _refresh()
         except SfincsUiError as exc:
             _notify(exc)
+
+    @render.ui
+    def download_box():
+        tick.get()
+        r = _selected()
+        if r is None:
+            return None
+        try:
+            run_service.download_path(current_user(), r["id"], "sfincs_his.nc")
+        except SfincsUiError:
+            return None
+        return ui.download_button("download_his", "Download sfincs_his.nc", class_="btn-sm btn-outline-secondary mb-2")
 
     @render.download(filename=lambda: "sfincs_his.nc")
     def download_his():

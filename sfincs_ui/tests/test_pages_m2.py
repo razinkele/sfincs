@@ -12,7 +12,7 @@ def test_pages_render_with_expected_ids():
     for i in ("setup-form", "setup-save_btn", "setup-launch_btn", "setup-header"):
         assert i in html
     html = str(runs.runs_ui("runs"))
-    for i in ("runs-run_table", "runs-detail", "runs-log_tail", "runs-download_his"):
+    for i in ("runs-run_table", "runs-detail", "runs-log_tail", "runs-download_box"):
         assert i in html
 
 
