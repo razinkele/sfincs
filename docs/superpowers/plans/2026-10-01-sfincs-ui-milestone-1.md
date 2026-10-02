@@ -1055,7 +1055,7 @@ Run from `sfincs_ui/`:
 export SFINCS_UI_WORKSPACE=/tmp/claude-1000/-home-razinka-sfincs/946ef2e3-64b8-42c9-b324-8e8da9f13c98/scratchpad/ag
 mkdir -p "$SFINCS_UI_WORKSPACE"
 /opt/micromamba/envs/shiny/bin/python -c "from sfincs_ui.db import base; base.init_db()"
-/opt/micromamba/envs/shiny/bin/alembic -c alembic.ini check
+/opt/micromamba/envs/shiny/bin/python -m alembic -c alembic.ini check
 ```
 
 Expected: `No new upgrade operations detected.` If it reports differences, the hand-written revision drifted from the models; fix the revision, not the models.
@@ -4220,7 +4220,7 @@ page's Queue policy tab. `MIN_FREE_GB` and `UPLOAD_MAX_MB` are env-only.
 
 ## Schema changes
 
-    cd sfincs_ui && SFINCS_UI_WORKSPACE=/tmp/x /opt/micromamba/envs/shiny/bin/alembic -c alembic.ini revision --autogenerate -m "describe"
+    cd sfincs_ui && SFINCS_UI_WORKSPACE=/tmp/x /opt/micromamba/envs/shiny/bin/python -m alembic -c alembic.ini revision --autogenerate -m "describe"
 
 Review the generated file under `sfincs_ui/migrations/versions/`; `env.py`
 must import every model module or autogenerate proposes dropping its tables
