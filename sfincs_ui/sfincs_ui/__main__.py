@@ -91,7 +91,7 @@ def _cmd_active_jobs(_args) -> int:
             print(f"{job.stage}\t{job.status}\tpid={job.pid}\talive={'yes' if alive else 'no'}\trun={run.name}\t{run.workdir}")
         if not rows:
             return 0
-        return 1 if any_alive else 2
+        return 3 if any_alive else 2
     finally:
         s.close()
 
@@ -106,20 +106,33 @@ def _cmd_kill_jobs(_args) -> int:
     s = base.get_session_factory()()
     try:
         rows = s.query(Job).filter(Job.status.in_(ACTIVE_JOB_STATUSES)).order_by(Job.id).all()
-        for job in rows:
-            outcome = "no process"
-            if job.pid and is_alive(job.pid, job.proc_starttime):
-                outcome = killpg_graceful(job.pid, grace_s=30.0)
-            job.status = "cancelled"; job.finished_at = utcnow()
-            run = s.get(Run, job.run_id)
+        targets = [(j.id, j.run_id, j.stage, j.pid, j.proc_starttime) for j in rows]
+        # 1. cancel the runs first and commit: a live runner's _claim sees `cancelled` and stops
+        #    instead of spawning the next stage into the gap between our kill and our commit.
+        for run_id in {t[1] for t in targets}:
+            run = s.get(Run, run_id)
             if run is not None and run.status not in ("finished", "failed", "cancelled", "orphaned"):
                 run.status = "cancelled"; run.finished_at = utcnow()
-            print(f"{job.stage} pid={job.pid}: {outcome}; run {job.run_id} cancelled")
         s.commit()
-        print(f"{len(rows)} active job(s) handled")
-        return 0
     finally:
         s.close()
+    # 2. kill what is alive
+    outcomes = {}
+    for job_id, run_id, stage, pid, st in targets:
+        outcomes[job_id] = killpg_graceful(pid, grace_s=30.0) if pid and is_alive(pid, st) else "no process"
+    # 3. close the job rows
+    s = base.get_session_factory()()
+    try:
+        for job_id, run_id, stage, pid, st in targets:
+            job = s.get(Job, job_id)
+            if job is not None and job.status in ACTIVE_JOB_STATUSES:
+                job.status = "cancelled"; job.finished_at = utcnow()
+            print(f"{stage} pid={pid}: {outcomes[job_id]}; run {run_id} cancelled")
+        s.commit()
+    finally:
+        s.close()
+    print(f"{len(targets)} active job(s) handled")
+    return 0
 
 
 def _cmd_serve(args) -> int:
@@ -145,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--email", default=None)
     p.set_defaults(func=_cmd_create_admin)
     sub.add_parser("preflight", help="verify binary, model env, inputs and workspace").set_defaults(func=_cmd_preflight)
-    sub.add_parser("active-jobs", help="list active stage jobs; exit 1 when a simulation is alive").set_defaults(func=_cmd_active_jobs)
+    sub.add_parser("active-jobs", help="list active stage jobs; exit 3 when a simulation is alive, 2 when active rows exist but none is alive, 0 when none").set_defaults(func=_cmd_active_jobs)
     sub.add_parser("kill-jobs", help="terminate every detached stage and cancel its run (used by uninstall)").set_defaults(func=_cmd_kill_jobs)
     p = sub.add_parser("serve", help="run the app with uvicorn")
     p.add_argument("--host", default="127.0.0.1")

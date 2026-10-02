@@ -80,13 +80,13 @@ render_template() {  # render_template <template> <dest>
         -e "s|@URL_PREFIX@|${URL_PREFIX}|g" -e "s|@UPLOAD_MAX_MB@|${UPLOAD_MAX_MB}|g" "$1" > "$2"
 }
 
-# Exit 1 from active-jobs means a simulation is alive. The unit's KillMode=process
+# Exit 3 from active-jobs means a simulation is alive. The unit's KillMode=process
 # keeps it alive across a restart and the queue reconciles it at startup, so a
 # restart is safe; we warn so the operator knows a run is in flight.
 warn_if_simulating() {
     local out rc=0
-    out="$(as_shiny active-jobs 2>/dev/null)" || rc=$?   # exit 1 = alive simulation; errexit must not fire here
-    if [[ $rc -eq 1 ]]; then
+    out="$(as_shiny active-jobs 2>/dev/null)" || rc=$?   # exit 3 = alive simulation; errexit must not fire here
+    if [[ $rc -eq 3 ]]; then
         warn "a simulation is running; restarting anyway (KillMode=process keeps it alive, the queue reconciles it):"
         echo "$out" | sed 's/^/      /'
     fi
@@ -96,7 +96,8 @@ wait_for_simulations() {  # --wait: poll up to 90 minutes
     local rc
     for _ in $(seq 1 180); do
         rc=0; as_shiny active-jobs >/dev/null 2>&1 || rc=$?
-        [[ $rc -ne 1 ]] && return 0
+        [[ $rc -eq 0 || $rc -eq 2 ]] && return 0
+        if [[ $rc -ne 3 ]]; then warn "active-jobs failed (exit $rc); restarting anyway"; return 0; fi
         info "a simulation is running; waiting 30 s (--wait)"
         sleep 30
     done
@@ -139,6 +140,7 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "$MODE" == "--restart" ]]; then
     need_root --restart
+    [[ -f "$ENV_FILE" ]] || fail "${ENV_FILE} missing; run a full install first"
     warn_if_simulating
     systemctl restart "$SERVICE_NAME" || fail "could not restart ${SERVICE_NAME}; see: journalctl -u ${SERVICE_NAME} -n 40"
     info "restarted ${SERVICE_NAME}"
@@ -162,8 +164,13 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "$MODE" == "--uninstall" ]]; then
     need_root --uninstall
-    [[ -f "$ENV_FILE" ]] && as_shiny kill-jobs || true
     if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then systemctl stop "$SERVICE_NAME"; fi
+    # Detached stages survive the stop (KillMode=process); end them explicitly.
+    if [[ -f "$ENV_FILE" ]]; then
+        as_shiny kill-jobs || warn "kill-jobs failed; check for surviving solvers with: ps -eo pid,cmd | grep sfincs"
+    else
+        warn "${ENV_FILE} absent; kill-jobs skipped (check for surviving solvers by hand)"
+    fi
     if [[ -f "$SERVICE_FILE" ]]; then
         systemctl disable "$SERVICE_NAME" 2>/dev/null || true
         rm -f "$SERVICE_FILE"; systemctl daemon-reload

@@ -28,7 +28,7 @@ def test_active_jobs_exit_codes(db, tmp_path, capsys):
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True)
     try:
         _job(db, run_id, proc.pid, proc_starttime(proc.pid))
-        assert cli.main(["active-jobs"]) == 1
+        assert cli.main(["active-jobs"]) == 3
         out = capsys.readouterr().out
         assert f"pid={proc.pid}" in out and "alive=yes" in out and "simulate" in out
     finally:
