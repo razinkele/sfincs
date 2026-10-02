@@ -3,9 +3,27 @@
 Web app for laguna.ku.lt through which a logged-in user creates a SFINCS
 project from a template, launches a simulation on the server and inspects the
 results. Design: `docs/superpowers/specs/2026-09-30-sfincs-ui-design.md`.
-Milestone 1 (this state): configuration, database, auth, Admin page, CLI,
-service unit and deploy script. Projects, runs and the queue arrive in
-milestone 2.
+Milestone 1: configuration, database, auth, Admin page, CLI, service unit and
+deploy script. Milestone 2 (this state): the Projects, Setup and Runs pages, a
+job queue with a runner that survives service restarts, and the CLI commands
+`active-jobs` and `kill-jobs`.
+
+## Projects, runs and the queue
+
+Projects (created from a template or cloned), Setup (edit a project's
+settings) and Runs (launch, watch progress, cancel, download) are pages of the
+app. Run directories live at `<workspace>/<project>/<run>/` and hold
+`settings.json`, `sfincs.inp`, `sfincs.inp.orig`, `overrides.diff`,
+`build.log` and `sfincs.log`, plus the solver outputs such as `sfincs_his.nc`.
+
+    python -m sfincs_ui active-jobs   # exit 0: none; 2: active rows, none alive; 3: a simulation is alive
+    python -m sfincs_ui kill-jobs     # cancel active runs, then kill their processes
+
+`deploy_ui.sh --uninstall` runs `kill-jobs` after the unit stops. The unit uses
+`KillMode=process`, so a restart leaves a running simulation alive and the
+queue reconciles it on the next start. The one test that runs the real solver
+is `tests/test_e2e_plane_beach.py` (skipped when `sfincs-linux/bin/sfincs` is
+absent).
 
 ## Layout
 
@@ -53,3 +71,17 @@ must import every model module or autogenerate proposes dropping its tables
 
 `sudo bash deploy/deploy_ui.sh` from the repo root; see `deploy/README.md`.
 Merge to main and push to origin before deploying; the prod clone fetches `origin/main`.
+
+## Acceptance: restart during a run
+
+The milestone 2 gate is a run that survives `systemctl restart sfincs-ui`.
+Measured on laguna with 4 threads: a 10 m plane beach takes about 62 s,
+a 5 m one about 540 s. Pick the resolution that gives you a few minutes:
+
+1. Log in, open the "Plane beach example" (Projects, Clone), set Cell size to 5 m, Save, Launch run with 4 threads.
+2. On the Runs page wait until the status is `running` and the progress bar moves.
+3. In a shell: `sudo bash deploy/deploy_ui.sh --restart`. The script warns that a simulation is running and restarts anyway.
+4. Reload the page, log in again if asked, select the run: the progress bar keeps moving and the run reaches `finished`
+   with `exit code unknown` on the simulate stage. `journalctl -u sfincs-ui -n 50` shows `reconcile: run … simulate -> resumed`;
+   systemd also logs `Found left-over process … Ignoring`, which is expected with `KillMode=process`.
+5. Download `sfincs_his.nc` from the Runs page.
