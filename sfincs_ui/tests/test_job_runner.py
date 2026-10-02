@@ -154,3 +154,86 @@ async def test_spawn_failure_releases_the_slot(runner, db, tmp_path):
     assert "internal error" in row["summary"]["reason"]
     assert row["jobs"][-1]["stage"] == "simulate" and row["jobs"][-1]["status"] == "failed"
     assert runner.active_jobs() == []
+
+
+async def test_run_chain_exception_closes_job_rows(runner, db, tmp_path, monkeypatch):
+    """Any exception after the spawn fails the run AND its job rows, so no slot is held."""
+    from sfincs_ui.services.job_runner import JobRunner
+    real = JobRunner._complete_job
+    calls = {"n": 0}
+
+    def boom(self, job_id, exit_code):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("database went away")
+        return real(self, job_id, exit_code)
+
+    monkeypatch.setattr(JobRunner, "_complete_job", boom)
+    run_id = make_run(db, tmp_path, "fake", S)
+    await runner.start()
+    runner.submit(run_id)
+    await runner.wait(run_id, timeout=20)
+    row = run_row(db, run_id)
+    assert row["status"] == "failed" and "internal error" in row["summary"]["reason"]
+    assert [(j["stage"], j["status"]) for j in row["jobs"]] == [("build", "failed")]
+    assert runner.active_jobs() == []
+
+
+async def test_cancel_closes_rows_even_if_kill_raises(runner, db, tmp_path, monkeypatch):
+    import pytest
+
+    from sfincs_ui.services import job_runner as jr
+    monkeypatch.setenv("FAKE_STEPS", "200")
+    monkeypatch.setenv("FAKE_SLEEP", "0.1")
+    run_id = make_run(db, tmp_path, "fake", S)
+    await runner.start()
+    runner.submit(run_id)
+    while not any(j["stage"] == "simulate" and j["pid"] for j in run_row(db, run_id)["jobs"]):
+        await asyncio.sleep(0.02)
+
+    def broken_kill(pid, grace_s=30.0, sleep=None):
+        raise PermissionError("not permitted")
+
+    monkeypatch.setattr(jr, "killpg_graceful", broken_kill)
+    with pytest.raises(PermissionError):
+        await runner.cancel(run_id)
+    row = run_row(db, run_id)
+    assert row["status"] == "cancelled" and all(j["status"] != "running" for j in row["jobs"])
+    assert row["jobs"][-1]["status"] == "cancelled" and runner.active_jobs() == []
+    assert run_id not in runner._procs
+    # the fixture teardown kills the still-running fake solver
+
+
+async def test_record_pid_failure_kills_the_spawned_group(runner, db, tmp_path, monkeypatch):
+    from sfincs_ui.services.job_runner import JobRunner
+
+    def boom(self, job_id, pid, starttime):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(JobRunner, "_record_pid", boom)
+    monkeypatch.setenv("FAKE_SLEEP", "30")  # the build is still running when the pid cannot be recorded
+    run_id = make_run(db, tmp_path, "fake", S)
+    await runner.start()
+    runner.submit(run_id)
+    await runner.wait(run_id, timeout=30)
+    row = run_row(db, run_id)
+    assert row["status"] == "failed" and row["jobs"][-1]["status"] == "failed"
+    assert runner.spawned_pids and all(not is_alive(pid, None) for pid in runner.spawned_pids)
+    assert runner.active_jobs() == []
+
+
+async def test_finish_run_ignores_cancelled_rows(runner, db, tmp_path):
+    """A requeued stage leaves a cancelled row with no exit code; it must not make the run's exit code unknown."""
+    from sfincs_ui.models import Job, Run
+    run_id = make_run(db, tmp_path, "fake", S)
+    s = db()
+    try:
+        run = s.get(Run, run_id)
+        s.add(Job(run_id=run_id, stage="build", status="cancelled", log_path=""))
+        s.add(Job(run_id=run_id, stage="build", status="completed", exit_code=0, log_path=""))
+        run.status = "running"; s.commit()
+    finally:
+        s.close()
+    runner._finish_run(run_id)
+    row = run_row(db, run_id)
+    assert row["status"] == "finished" and row["exit_code"] == 0

@@ -34,6 +34,8 @@ LOG_NAMES = {"build": "build.log", "simulate": "sfincs.log", "validate": "valida
 # The solver opens and truncates sfincs.log itself; its stdout must not share that file.
 STDOUT_NAMES = {**LOG_NAMES, "simulate": "simulate.log"}
 SUMMARY_TAIL = 50
+# runs.status values while a stage is in progress; only their running jobs hold a capacity slot
+STAGE_RUN_STATUSES = tuple(RUN_STATUS_FOR_STAGE.values())
 OVERRIDES_DIFF = "overrides.diff"
 
 
@@ -177,6 +179,7 @@ class JobRunner:
             specs = self.plan_stages(run_id)
         except Exception:
             logger.exception("cannot plan stages for run %s", run_id)
+            self._fail_jobs_for_run(run_id)  # a resumed chain arrives here with a running row
             self._fail_run(run_id, "plan", "cannot plan stages", None, "")
             return
         for index in range(start_index, len(specs)):
@@ -187,6 +190,7 @@ class JobRunner:
                 raise  # uvicorn shutdown: leave the child and the rows alone for reconciliation
             except Exception as exc:
                 logger.exception("stage %s of run %s raised", spec.stage, run_id)
+                self._fail_jobs_for_run(run_id)  # otherwise the row holds its capacity slot forever
                 self._fail_run(run_id, spec.stage, f"internal error: {exc}", None, tail_lines(spec.log_path, SUMMARY_TAIL))
                 return
             if not ok:
@@ -202,10 +206,21 @@ class JobRunner:
                 return False
             try:
                 proc, pid, starttime = self._spawn(spec)
-                self._procs[run_id] = proc
-                self._record_pid(job_id, pid, starttime)
             except Exception:
                 self._fail_job(job_id, None)  # release the capacity slot before the chain fails the run
+                raise
+            self._procs[run_id] = proc
+            try:
+                self._record_pid(job_id, pid, starttime)
+            except Exception:
+                # Nobody could find this process again (no pid on the row): stop it before failing the job.
+                try:
+                    await asyncio.to_thread(killpg_graceful, pid, 5)
+                    await asyncio.to_thread(proc.wait, 5)
+                except Exception:
+                    logger.exception("cannot stop process %s of run %s after recording its pid failed", pid, run_id)
+                self._procs.pop(run_id, None)
+                self._fail_job(job_id, None)
                 raise
         else:
             job_id = self._active_job_id(run_id, spec.stage)
@@ -251,13 +266,14 @@ class JobRunner:
             await asyncio.sleep(self._poll)
 
     def _has_capacity(self, stage: str) -> bool:
+        """Count running jobs of runs that are themselves in progress: a stale row under a finished run holds no slot."""
         s = self._sf()
         try:
+            running = (s.query(Job).join(Run, Job.run_id == Run.id)
+                       .filter(Job.status == "running", Run.status.in_(STAGE_RUN_STATUSES)))
             if stage == "simulate":
-                running = s.query(Job).filter(Job.stage == "simulate", Job.status == "running").count()
-                return running < self._settings.get("max_simulations")
-            running = s.query(Job).filter(Job.stage != "simulate", Job.status == "running").count()
-            return running < self._aux_cap
+                return running.filter(Job.stage == "simulate").count() < self._settings.get("max_simulations")
+            return running.filter(Job.stage != "simulate").count() < self._aux_cap
         finally:
             s.close()
 
@@ -294,27 +310,32 @@ class JobRunner:
             s.commit()
         finally:
             s.close()
-        for _jid, pid, st in active:
-            if pid and is_alive(pid, st):
-                await asyncio.to_thread(killpg_graceful, pid, self._grace)
-        proc = self._procs.pop(run_id, None)
-        if proc is not None:  # reap, so the pid is not left as a zombie
-            try:
-                await asyncio.to_thread(proc.wait, 5)
-            except subprocess.TimeoutExpired:
-                logger.warning("process %s of run %s did not exit after SIGKILL", proc.pid, run_id)
-        s = self._sf()  # free the capacity slots only now that the processes are gone
         try:
-            for jid, _pid, _st in active:
-                job = s.get(Job, jid)
-                if job is not None:
-                    job.status = "cancelled"; job.finished_at = utcnow()
-            s.commit()
+            for _jid, pid, st in active:
+                if pid and is_alive(pid, st):
+                    await asyncio.to_thread(killpg_graceful, pid, self._grace)
+            proc = self._procs.pop(run_id, None)
+            if proc is not None:  # reap, so the pid is not left as a zombie
+                try:
+                    await asyncio.to_thread(proc.wait, 5)
+                except subprocess.TimeoutExpired:
+                    logger.warning("process %s of run %s did not exit after SIGKILL", proc.pid, run_id)
         finally:
-            s.close()
-        task = self._tasks.get(run_id)
-        if task is not None:
-            task.cancel()
+            # Free the capacity slots once the processes are gone, and also when the kill raised:
+            # the run is cancelled either way and its rows must not stay active.
+            self._procs.pop(run_id, None)
+            s = self._sf()
+            try:
+                for jid, _pid, _st in active:
+                    job = s.get(Job, jid)
+                    if job is not None:
+                        job.status = "cancelled"; job.finished_at = utcnow()
+                s.commit()
+            finally:
+                s.close()
+            task = self._tasks.get(run_id)
+            if task is not None:
+                task.cancel()
 
     # -- queries -----------------------------------------------------------
 
@@ -388,6 +409,16 @@ class JobRunner:
         finally:
             s.close()
 
+    def _fail_jobs_for_run(self, run_id: str) -> None:
+        """Close every active job row of the run as failed (releases its capacity slot)."""
+        s = self._sf()
+        try:
+            for job in s.query(Job).filter(Job.run_id == run_id, Job.status.in_(ACTIVE_JOB_STATUSES)).all():
+                job.status = "failed"; job.finished_at = utcnow()
+            s.commit()
+        finally:
+            s.close()
+
     def _fail_run(self, run_id: str, stage: str, reason: str, exit_code: int | None, log_tail: str) -> None:
         s = self._sf()
         try:
@@ -406,7 +437,7 @@ class JobRunner:
             run = s.get(Run, run_id)
             if run is None or run.status == "cancelled":
                 return
-            codes = [j.exit_code for j in run.jobs]
+            codes = [j.exit_code for j in run.jobs if j.status != "cancelled"]  # a requeued stage leaves a cancelled row
             run.status = "finished"; run.finished_at = utcnow()
             run.exit_code = None if any(c is None for c in codes) else 0
             s.commit()

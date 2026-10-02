@@ -186,3 +186,80 @@ async def test_reconcile_planning_failure_fails_only_that_run(runner, db, tmp_pa
     row = run_row(db, bad)
     assert row["status"] == "failed" and "cannot plan stages" in row["summary"]["reason"]
     await runner.wait(good, timeout=20)
+
+
+_FINISH_LATER = "sleep 1; : > sfincs_his.nc; echo '---------- Simulation finished -----------' >> sfincs.log"
+
+
+def _stand_in(runner, wd, script=_FINISH_LATER):
+    """A detached process standing in for a solver that survived a restart."""
+    proc = subprocess.Popen(["bash", "-c", script], cwd=wd, start_new_session=True,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    runner.spawned_pids.add(proc.pid)
+    return proc
+
+
+async def test_reconcile_closes_running_job_under_terminal_run(runner, db, tmp_path):
+    """A running row under a cancelled run (restart during cancel's grace) must not hold a slot forever."""
+    run_id = make_run(db, tmp_path, "fake", S)
+    _set(db, run_id, run_status="cancelled", jobs=[("simulate", "running", 2**22 - 2, 123)])
+    decisions = reconcile(runner)
+    assert decisions == [{"run_id": run_id, "stage": "simulate", "decision": "closed_stale"}]
+    row = run_row(db, run_id)
+    assert row["status"] == "cancelled" and row["jobs"][-1]["status"] == "cancelled"
+    assert runner.active_jobs() == [] and runner._has_capacity("simulate") is True
+
+
+async def test_reconcile_kills_a_live_process_under_terminal_run(runner, db, tmp_path):
+    from sfincs_ui.services.procs import is_alive
+    run_id = make_run(db, tmp_path, "fake", S)
+    proc = _stand_in(runner, run_row(db, run_id)["workdir"], "sleep 30")
+    st = proc_starttime(proc.pid)
+    _set(db, run_id, run_status="failed", jobs=[("simulate", "running", proc.pid, st)])
+    assert reconcile(runner)[0]["decision"] == "closed_stale"
+    proc.wait(5)
+    assert not is_alive(proc.pid, st) and runner.active_jobs() == []
+    assert run_row(db, run_id)["status"] == "failed"
+
+
+async def test_reconcile_one_bad_run_does_not_block_others(runner, db, tmp_path):
+    from sfincs_ui.services.model_service import write_overrides
+    bad = make_run(db, tmp_path, "fake", S, name="bad")
+    wb = run_row(db, bad)["workdir"]
+    _built(wb)
+    (wb / "settings.json").write_text("{corrupt")
+    _set(db, bad, run_status="building", jobs=[("build", "running", 2**22 - 2, 123)])
+    good = make_run(db, tmp_path, "fake", S, name="good")
+    wg = run_row(db, good)["workdir"]
+    _built(wg)
+    write_overrides(wg, {"alpha": "0.7"})
+    proc = _stand_in(runner, wg)
+    _set(db, good, run_status="running", jobs=[("build", "completed", 1, 1), ("simulate", "running", proc.pid, proc_starttime(proc.pid))])
+    decisions = {d["run_id"]: d["decision"] for d in reconcile(runner)}
+    assert decisions == {bad: "failed", good: "resumed"}
+    row = run_row(db, bad)
+    assert row["status"] == "failed" and "cannot" in row["summary"]["reason"]
+    assert [j["status"] for j in row["jobs"]] == ["failed"]
+    await runner.wait(good, timeout=20)
+    assert run_row(db, good)["status"] == "finished"
+    assert runner.active_jobs() == []
+
+
+async def test_reconcile_planning_failure_on_resumed_process_closes_the_job(runner, db, tmp_path):
+    from sfincs_ui.services.model_service import write_overrides
+    from sfincs_ui.services.procs import is_alive
+    run_id = make_run(db, tmp_path, "fake", S)
+    wd = run_row(db, run_id)["workdir"]
+    _built(wd)
+    write_overrides(wd, {"alpha": "0.7"})
+    proc = _stand_in(runner, wd, "sleep 30")
+    st = proc_starttime(proc.pid)
+    _set(db, run_id, run_status="running", jobs=[("build", "completed", 1, 1), ("simulate", "running", proc.pid, st)])
+    (wd / "settings.json").write_text("{corrupt")  # plan_stages cannot read the run's settings any more
+    decisions = reconcile(runner)
+    assert decisions == [{"run_id": run_id, "stage": "simulate", "decision": "failed"}]
+    row = run_row(db, run_id)
+    assert row["status"] == "failed" and "cannot plan stages" in row["summary"]["reason"]
+    assert row["jobs"][-1]["status"] == "failed" and runner.active_jobs() == []
+    proc.wait(5)  # nobody can monitor it, so reconcile kills it
+    assert not is_alive(proc.pid, st)
