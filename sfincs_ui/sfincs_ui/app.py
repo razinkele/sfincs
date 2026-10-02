@@ -9,13 +9,13 @@ from shiny import App, reactive, render, ui
 
 from sfincs_ui.config import Config, get_config, set_config
 from sfincs_ui.db.base import init_db
-from sfincs_ui.middleware.session_auth import SessionAuthMiddleware, get_current_user
+from sfincs_ui.middleware.session_auth import SessionAuthMiddleware, get_current_session_token
 from sfincs_ui.pages import admin, home
 from sfincs_ui.services.audit_service import AuditService
 from sfincs_ui.services.auth_service import AuthService
 from sfincs_ui.services.environment import EnvironmentReport, check_environment
 from sfincs_ui.services.settings_service import SettingsService
-from sfincs_ui.services.ws_identity import resolve_ws_user
+from sfincs_ui.services.ws_identity import resolve_identity
 
 logger = logging.getLogger(__name__)
 
@@ -63,21 +63,21 @@ def build_ui(config: Config, report: EnvironmentReport) -> ui.Tag:
 def build_server(config: Config, auth_service: AuthService, audit_service: AuditService,
                  settings_service: SettingsService):
     def server(input, output, session):
-        ws_user: reactive.Value[dict | None] = reactive.value(None)
-
-        @reactive.effect
-        def _resolve_identity():
-            token = input._wsauth() if "_wsauth" in input else None
-            try:
-                ws_user.set(resolve_ws_user(token, auth_service))
-            except Exception:
-                logger.warning("ws identity resolution failed; treating as anonymous", exc_info=True)
-                ws_user.set(None)
+        # The cookie seen when the websocket connected. Only the raw token is
+        # kept: the user behind it is re-read from the database on every call.
+        session_token = get_current_session_token()
 
         def current_user() -> dict | None:
-            # The ws-token bridge first; under direct uvicorn the cookie also
-            # reaches the websocket scope, so fall back to it.
-            return ws_user.get() or get_current_user()
+            # Re-validated on every call (never cached) so logout, deactivation,
+            # demotion, password reset and deletion take effect on the next
+            # render or click of an already-open tab. The ws-token bridge comes
+            # first; under direct uvicorn the cookie also reaches the websocket.
+            ws_token = input._wsauth() if "_wsauth" in input else None
+            try:
+                return resolve_identity(ws_token, session_token, auth_service)
+            except Exception:
+                logger.warning("identity resolution failed; treating as anonymous", exc_info=True)
+                return None
 
         hidden = {"admin": False}
 

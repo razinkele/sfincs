@@ -76,3 +76,38 @@ async def test_create_app_serves_home_anonymously(app):
         assert r.status_code == 200 and "SFINCS UI" in r.text
         r = await c.get("/api/whoami")
         assert r.json()["username"] is None
+
+
+class TestAdminHelpers:
+    def test_collect_policy_changes_validates_everything_first(self):
+        before = {"a": 1, "b": 2}
+        with pytest.raises(ValueError):
+            admin._collect_policy_changes({"a": 5, "b": None}, before)
+        with pytest.raises((ValueError, TypeError)):
+            admin._collect_policy_changes({"a": 5, "b": "x"}, before)
+
+    def test_collect_policy_changes_uses_validator_on_every_key_before_saving(self):
+        def validate(key, value):
+            if int(value) > 10:
+                raise ValueError(f"{key} above ceiling")
+            return int(value)
+
+        with pytest.raises(ValueError, match="b above ceiling"):
+            admin._collect_policy_changes({"a": 5, "b": 99}, {"a": 1, "b": 2}, validate=validate)
+
+    def test_collect_policy_changes_returns_only_changes(self):
+        assert admin._collect_policy_changes({"a": 1, "b": 3.0}, {"a": 1, "b": 2}) == {"b": {"old": 2, "new": 3}}
+
+    def test_audit_as_refuses_without_actor(self):
+        from unittest.mock import MagicMock
+
+        audit = MagicMock()
+        assert admin._audit_as(None, audit, "create_user", target="user:x") is False
+        audit.log.assert_not_called()
+
+    def test_audit_as_writes_with_actor(self):
+        from unittest.mock import MagicMock
+
+        audit = MagicMock()
+        assert admin._audit_as({"id": 7, "username": "root"}, audit, "create_user", target="user:x", detail={"role": "user"}) is True
+        audit.log.assert_called_once_with("root", "create_user", target="user:x", detail={"role": "user"}, user_id=7)

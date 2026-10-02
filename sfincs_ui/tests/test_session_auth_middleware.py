@@ -231,3 +231,30 @@ class TestClientIp:
 
     def test_no_client_is_unknown(self):
         assert get_client_ip({"headers": []}, []) == "unknown"
+
+
+class TestSessionTokenContextvar:
+    async def test_session_token_published_and_reset(self):
+        from sfincs_ui.middleware.session_auth import get_current_session_token
+
+        auth = MagicMock(); auth.validate_session.return_value = USER
+        seen = {}
+
+        async def app(scope, receive, send):
+            seen["token"] = get_current_session_token()
+
+        await SessionAuthMiddleware(app, auth)(_scope(type_="websocket", cookies=f"{SESSION_COOKIE}=tok"), AsyncMock(), AsyncMock())
+        assert seen["token"] == "tok"
+        assert get_current_session_token() is None
+
+    async def test_no_cookie_publishes_no_token(self):
+        from sfincs_ui.middleware.session_auth import get_current_session_token
+
+        seen = {}
+
+        async def app(scope, receive, send):
+            seen["token"] = get_current_session_token()
+
+        await SessionAuthMiddleware(app, MagicMock())(_scope(), AsyncMock(), AsyncMock())
+        assert seen["token"] is None
+

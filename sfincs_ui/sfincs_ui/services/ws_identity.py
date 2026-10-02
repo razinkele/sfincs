@@ -1,26 +1,27 @@
-"""Websocket identity resolver (pure wrapper around AuthService.validate_ws_token).
+"""Server-side identity resolution for one reactive evaluation.
 
-Pure, dependency-light wrapper around AuthService.validate_ws_token so the
-resolution logic can be unit-tested without a real database or Shiny session.
+Pure and dependency-light so the authorization check can be unit-tested
+against a real database without a Shiny session.
 """
 
 from __future__ import annotations
 
 
-def resolve_ws_user(ws_token: str | None, auth_service) -> dict | None:
-    """Resolve a WS-auth token to a user dict, server-side.
-
-    Pure wrapper for testability.
+def resolve_identity(ws_token: str | None, session_token: str | None, auth_service) -> dict | None:
+    """Server-validated identity for one reactive evaluation: the ws token first, then the cookie session. Always consults the database, so logout, deactivation, demotion and deletion take effect on the next call.
 
     Args:
-        ws_token: The raw token string from the ``_wsauth`` Shiny input.
-            Falsy values (empty string, None) are rejected immediately.
-        auth_service: Any object with a ``validate_ws_token(token: str)``
-            method that returns a user dict or None.
+        ws_token: The raw token from the ``_wsauth`` Shiny input (falsy means none).
+        session_token: The raw ``sfincs_ui_session`` cookie seen when the websocket connected.
+        auth_service: Anything with ``validate_ws_token`` and ``validate_session``.
 
     Returns:
-        The user dict if the token is valid and unexpired, otherwise None.
+        The user dict, or None when neither token validates.
     """
-    if not ws_token:
-        return None
-    return auth_service.validate_ws_token(ws_token)
+    if ws_token:
+        user = auth_service.validate_ws_token(ws_token)
+        if user is not None:
+            return user
+    if session_token:
+        return auth_service.validate_session(session_token)
+    return None

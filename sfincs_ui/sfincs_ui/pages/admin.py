@@ -58,6 +58,32 @@ def _check_admin_access(user: dict | None) -> bool:
     return bool(user) and user.get("role") == ROLE_ADMIN
 
 
+def _collect_policy_changes(values: dict, before: dict, validate=None) -> dict:
+    """Validate and convert every submitted policy value, then diff against ``before``.
+
+    ``validate(key, value) -> int`` defaults to ``int``; the page passes
+    ``SettingsService.validate`` so the ceiling checks run here too. Raises
+    ValueError/TypeError on the first bad value before anything is saved, so
+    a later bad key can never leave earlier keys saved without an audit row.
+    """
+    validate = validate or (lambda _key, value: int(value))
+    converted = {}
+    for key, value in values.items():
+        if value is None:
+            raise ValueError(f"{key} is empty")
+        converted[key] = validate(key, value)
+    return {k: {"old": before[k], "new": v} for k, v in converted.items() if v != before[k]}
+
+
+def _audit_as(actor: dict | None, audit_service, action: str, target: str | None = None, detail=None) -> bool:
+    """Write one audit row as ``actor``; refuse (and log) when there is no validated actor."""
+    if not actor:
+        logger.warning("admin action %s on %s refused for audit: no validated actor", action, target)
+        return False
+    audit_service.log(actor["username"], action, target=target, detail=detail, user_id=actor.get("id"))
+    return True
+
+
 def _role_badge(role: str) -> str:
     cls = "bg-danger" if role == ROLE_ADMIN else "bg-primary"
     return f'<span class="badge {cls}">{role}</span>'
@@ -123,12 +149,16 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
     def _is_admin() -> bool:
         return _check_admin_access(current_user())
 
-    def _actor() -> dict:
-        return current_user() or {"username": "unknown", "id": None}
+    def _admin_actor() -> dict | None:
+        """The re-validated admin making this request, or None (mutation refused)."""
+        user = current_user()
+        return user if _check_admin_access(user) else None
 
-    def _audit(action: str, target: str | None = None, detail=None) -> None:
-        a = _actor()
-        audit_service.log(a["username"], action, target=target, detail=detail, user_id=a.get("id"))
+    def _audit(actor: dict | None, action: str, target: str | None = None, detail=None) -> None:
+        # The actor is captured before the mutation: resetting one's own
+        # password or demoting oneself ends one's own session, and the row
+        # must still be written. Never fabricates an actor.
+        _audit_as(actor, audit_service, action, target=target, detail=detail)
 
     def _refresh_users() -> None:
         users_data.set(auth_service.list_users())
@@ -198,7 +228,8 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
         @reactive.effect
         @reactive.event(input[f"confirm_reset_pw_{uid}"])
         def _do_reset_pw():
-            if not _is_admin():
+            actor = _admin_actor()
+            if actor is None:
                 return
             pw = input[f"new_pw_{uid}"]() or ""
             if len(pw) < 8:
@@ -212,21 +243,22 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
             if not ok:
                 ui.notification_show("User not found", type="error")
                 return
-            _audit("reset_password", target=f"user:{uid}")
+            _audit(actor, "reset_password", target=f"user:{uid}")
             ui.modal_remove()
             ui.notification_show("Password reset", type="message")
 
         @reactive.effect
         @reactive.event(input[f"toggle_active_{uid}"])
         def _toggle_active():
-            if not _is_admin():
+            actor = _admin_actor()
+            if actor is None:
                 return
             user = next((u for u in users_data.get() if u["id"] == uid), None)
             if user is None:
                 return
             try:
                 auth_service.update_user(uid, is_active=not user["is_active"])
-                _audit("toggle_active", target=f"user:{uid}", detail={"is_active": not user["is_active"]})
+                _audit(actor, "toggle_active", target=f"user:{uid}", detail={"is_active": not user["is_active"]})
                 _refresh_users()
             except ValueError as exc:
                 _notify_error(exc)
@@ -234,7 +266,8 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
         @reactive.effect
         @reactive.event(input[f"toggle_role_{uid}"])
         def _toggle_role():
-            if not _is_admin():
+            actor = _admin_actor()
+            if actor is None:
                 return
             user = next((u for u in users_data.get() if u["id"] == uid), None)
             if user is None:
@@ -242,7 +275,7 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
             new_role = ROLE_USER if user["role"] == ROLE_ADMIN else ROLE_ADMIN
             try:
                 auth_service.update_user(uid, role=new_role)
-                _audit("change_role", target=f"user:{uid}", detail={"role": new_role})
+                _audit(actor, "change_role", target=f"user:{uid}", detail={"role": new_role})
                 _refresh_users()
             except ValueError as exc:
                 _notify_error(exc)
@@ -262,11 +295,13 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
         @reactive.effect
         @reactive.event(input[f"confirm_delete_{uid}"])
         def _do_delete_user():
-            if not _is_admin():
+            actor = _admin_actor()
+            if actor is None:
                 return
             try:
                 auth_service.delete_user(uid)
-                _audit("delete_user", target=f"user:{uid}")
+                # Self-deletion: the actor's row is gone, so the audit row keeps the name only.
+                _audit({**actor, "id": None} if actor["id"] == uid else actor, "delete_user", target=f"user:{uid}")
                 _refresh_users()
                 ui.modal_remove()
             except ValueError as exc:
@@ -306,7 +341,8 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
     @reactive.effect
     @reactive.event(input.confirm_create_user)
     def _do_create_user():
-        if not _is_admin():
+        actor = _admin_actor()
+        if actor is None:
             return
         username, password = (input.new_username() or "").strip(), input.new_password() or ""
         role, email = input.new_role(), (input.new_email() or "").strip() or None
@@ -320,7 +356,7 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
             create_errors.set([str(exc)])
             return
         create_errors.set([])
-        _audit("create_user", target=f"user:{username}", detail={"role": role})
+        _audit(actor, "create_user", target=f"user:{username}", detail={"role": role})
         _refresh_users()
         ui.modal_remove()
         ui.notification_show(f"Created {username}", type="message")
@@ -342,23 +378,21 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
     @reactive.effect
     @reactive.event(input.policy_save)
     def _save_policy():
-        if not _is_admin():
+        actor = _admin_actor()
+        if actor is None:
             return
         before = settings_service.effective()
-        changed = {}
         try:
-            for key in POLICY_KEYS:
-                value = input[f"policy_{key}"]()
-                if value is None:
-                    raise ValueError(f"{key} is empty")
-                if int(value) != before[key]:
-                    settings_service.set(key, int(value))
-                    changed[key] = {"old": before[key], "new": int(value)}
+            changed = _collect_policy_changes(
+                {key: input[f"policy_{key}"]() for key in POLICY_KEYS}, before, validate=settings_service.validate,
+            )
+            for key, change in changed.items():
+                settings_service.set(key, change["new"])
         except (ValueError, TypeError) as exc:
             _notify_error(exc)
             return
         if changed:
-            _audit("settings_update", target="queue_policy", detail=changed)
+            _audit(actor, "settings_update", target="queue_policy", detail=changed)
         ui.notification_show("Policy saved" if changed else "No changes", type="message")
 
     # Audit log --------------------------------------------------------------

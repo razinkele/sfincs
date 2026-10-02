@@ -73,13 +73,18 @@ class SettingsService:
             for k in POLICY_KEYS
         ]
 
-    def set(self, key: str, value: int) -> int:
+    def validate(self, key: str, value) -> int:
+        """Convert and bound-check one value without saving it (ValueError/TypeError/KeyError)."""
         ceiling = self.ceiling(key)
         value = int(value)
         if value < 1:
             raise ValueError(f"{_META[key][0]} must be at least 1")
         if value > ceiling:
             raise ValueError(f"{_META[key][0]} may not exceed the server ceiling of {ceiling}")
+        return value
+
+    def set(self, key: str, value: int) -> int:
+        value = self.validate(key, value)
         session = self._session_factory()
         try:
             row = session.get(Setting, key)

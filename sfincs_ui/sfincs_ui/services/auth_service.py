@@ -137,12 +137,22 @@ class AuthService:
         finally:
             session.close()
 
+    @staticmethod
+    def _purge_logins(session, user_id: int) -> None:
+        """Delete every HTTP session and websocket token of one user (caller commits)."""
+        session.query(WSAuthToken).filter_by(user_id=user_id).delete()
+        session.query(AuthSession).filter_by(user_id=user_id).delete()
+
     def update_user(self, user_id: int, **kwargs) -> dict | None:
-        """Update user fields (display_name, email, role).
+        """Update user fields (display_name, email, role, is_active).
+
+        Deactivating a user or taking away the admin role also ends all of
+        that user's sessions and websocket tokens, so open tabs lose their
+        authority on the next reactive evaluation.
 
         Args:
             user_id: User to update.
-            **kwargs: Fields to update (display_name, email, role).
+            **kwargs: Fields to update (display_name, email, role, is_active).
 
         Returns:
             Updated user dict, or None if not found.
@@ -165,9 +175,14 @@ class AuthService:
                     raise ValueError("Cannot demote or deactivate the last admin")
             if "role" in kwargs and kwargs["role"] not in ROLES:
                 raise ValueError(f"role must be one of {ROLES}")
+            revoke = ("is_active" in kwargs and not kwargs["is_active"]) or (
+                user.role == ROLE_ADMIN and "role" in kwargs and kwargs["role"] != ROLE_ADMIN
+            )
             for key, value in kwargs.items():
                 if key in allowed:
                     setattr(user, key, value)
+            if revoke:
+                self._purge_logins(session, user_id)
             session.commit()
             return self._user_to_dict(user)
         except Exception:
@@ -217,7 +232,7 @@ class AuthService:
             session.close()
 
     def reset_password(self, user_id: int, new_password: str) -> bool:
-        """Reset a user's password.
+        """Reset a user's password and end all of that user's existing logins.
 
         Returns:
             True if the user was found and password was reset, False if not found.
@@ -228,6 +243,7 @@ class AuthService:
             if user is None:
                 return False
             user.password_hash = self.hash_password(new_password)
+            self._purge_logins(session, user_id)
             session.commit()
             return True
         except Exception:

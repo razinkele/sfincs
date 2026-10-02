@@ -26,11 +26,21 @@ CSRF_COOKIE = "sfincs_ui_csrf"
 _MAX_FORM_BODY = 16 * 1024
 
 _user_var: contextvars.ContextVar[dict | None] = contextvars.ContextVar("sfincs_ui_user", default=None)
+_token_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("sfincs_ui_session_token", default=None)
 
 
 def get_current_user() -> dict | None:
-    """The user resolved for the current ASGI scope, or None."""
+    """The user resolved for the current ASGI scope, or None.
+
+    For a websocket this is a snapshot taken at connect time; authorization
+    decisions must re-validate through ``get_current_session_token()``.
+    """
     return _user_var.get()
+
+
+def get_current_session_token() -> str | None:
+    """The raw session cookie value for the current ASGI scope, or None."""
+    return _token_var.get()
 
 
 def _parse_cookie(raw: bytes) -> dict[str, str]:
@@ -144,11 +154,13 @@ class SessionAuthMiddleware:
                 return
 
         user = self.auth_service.validate_session(session_token) if session_token else None
-        token = _user_var.set(user)
+        user_token = _user_var.set(user)
+        session_var_token = _token_var.set(session_token or None)
         try:
             await self.app(scope, receive, send)
         finally:
-            _user_var.reset(token)
+            _token_var.reset(session_var_token)
+            _user_var.reset(user_token)
 
     # -- helpers ---------------------------------------------------------
 
