@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sfincs_ui.config import Config
 from sfincs_ui.exceptions import LaunchRefused, NotAllowed, NotFound
-from sfincs_ui.models import ACTIVE_JOB_STATUSES, Job, Project, Run, new_id
+from sfincs_ui.models import ACTIVE_JOB_STATUSES, Project, Run, new_id
 from sfincs_ui.services import access_control as ac
 from sfincs_ui.services.job_runner import LOG_NAMES, JobRunner
 from sfincs_ui.services.model_service import write_settings
@@ -97,16 +97,27 @@ class RunService:
         settings = template.validate(project["settings"])
         run_id = new_id()
         run_dir = self._projects.project_dir(project_id) / run_id
+        write_settings(run_dir, settings)  # may raise (disk full, permissions): nothing is in the DB yet
         s = self._sf()
         try:
             r = Run(id=run_id, project_id=project_id, name=name, status="queued", settings_json=json.dumps(settings),
                     workdir=str(run_dir), threads=threads)
             s.add(r); s.commit()
-            write_settings(run_dir, settings)
             d = self._to_dict(r, s)
         finally:
             s.close()
-        self._runner.submit(run_id)
+        try:
+            self._runner.submit(run_id)
+        except Exception:
+            s = self._sf()
+            try:
+                row = s.get(Run, run_id)
+                if row is not None:
+                    s.delete(row); s.commit()
+            finally:
+                s.close()
+            shutil.rmtree(run_dir, ignore_errors=True)
+            raise
         return d
 
     # -- reads -------------------------------------------------------------
@@ -123,7 +134,9 @@ class RunService:
         finally:
             s.close()
 
-    def running_jobs(self) -> list[dict]:
+    def running_jobs(self, user: dict | None) -> list[dict]:
+        if not ac.is_admin(user):
+            raise NotAllowed("Administrator access required")
         return self._runner.active_jobs()
 
     def get(self, user: dict | None, run_id: str) -> dict:

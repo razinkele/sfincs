@@ -12,13 +12,14 @@ from tests.fake_template import FakeTemplate
 
 
 @pytest.fixture
-def world(db, tmp_path, runner):
+def world(db, tmp_path, runner, monkeypatch):
     from sfincs_ui.config import get_config
     cfg = get_config()  # set by the runner fixture: max_simulations=1, max_threads=4, min_free_gb=10, fake binary
     auth = AuthService(session_factory=db)
     admin, _ = auth.ensure_admin("root", "pw12345678")
     alice = auth.create_user("alice", "pw12345678")
     bob = auth.create_user("bob", "pw12345678")
+    monkeypatch.setattr(rs, "free_space_gb", lambda path: 500.0)
     templates = {"fake": FakeTemplate()}
     projects = ProjectService(cfg, session_factory=db, templates=templates)
     settings = SettingsService(cfg, session_factory=db)
@@ -65,7 +66,9 @@ async def test_cancel_other_users_run_refused(world, runner, monkeypatch):
     monkeypatch.setenv("FAKE_STEPS", "100"); monkeypatch.setenv("FAKE_SLEEP", "0.1")
     await runner.start()
     r = world["runs"].launch(world["alice"], world["project"]["id"], "slow", 1)
+    deadline = asyncio.get_running_loop().time() + 30
     while world["runs"].get(world["alice"], r["id"])["status"] != "running":
+        assert asyncio.get_running_loop().time() < deadline
         await asyncio.sleep(0.02)
     with pytest.raises(NotAllowed):
         await world["runs"].cancel(world["bob"], r["id"])
@@ -103,11 +106,28 @@ async def test_list_for_scopes_and_running_jobs(world, runner, monkeypatch):
     assert [x["id"] for x in world["runs"].list_for(world["alice"])] == [r["id"]]
     assert world["runs"].list_for(world["bob"]) == []
     assert [x["id"] for x in world["runs"].list_for(world["admin"])] == [r["id"]]
-    while not world["runs"].running_jobs():
+    deadline = asyncio.get_running_loop().time() + 30
+    while not world["runs"].running_jobs(world["admin"]):
+        assert asyncio.get_running_loop().time() < deadline
         await asyncio.sleep(0.02)
-    assert world["runs"].running_jobs()[0]["run_id"] == r["id"]
+    assert world["runs"].running_jobs(world["admin"])[0]["run_id"] == r["id"]
+    with pytest.raises(NotAllowed):
+        world["runs"].running_jobs(world["alice"])
     await world["runs"].cancel(world["alice"], r["id"])
 
 
 def test_free_space_gb(tmp_path):
     assert rs.free_space_gb(tmp_path) > 0
+
+
+def test_launch_failure_before_submit_leaves_no_row(world, monkeypatch):
+    from sfincs_ui.services import run_service as rs_mod
+
+    def boom(run_dir, settings):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(rs_mod, "write_settings", boom)
+    with pytest.raises(OSError):
+        world["runs"].launch(world["alice"], world["project"]["id"], "x", 1)
+    assert world["runs"].list_for(world["alice"]) == []
+    world["projects"].delete(world["alice"], world["project"]["id"])  # must not be blocked by a phantom active run

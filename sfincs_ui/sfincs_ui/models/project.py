@@ -26,7 +26,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    owner_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    owner_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     template: Mapped[str] = mapped_column(String(64), nullable=False)
     settings_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")

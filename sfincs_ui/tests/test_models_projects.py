@@ -37,15 +37,17 @@ def test_project_run_job_round_trip_and_cascades(db):
         s.close()
 
 
-def test_deleting_owner_keeps_project_as_system_owned(db):
+def test_deleting_owner_deletes_their_projects_not_examples(db):
+    """A deleted user's projects must not become system examples (owner NULL = usable by everyone)."""
     s = db()
     try:
         u = User(username="owner2", password_hash="x", role="user", is_active=True)
         s.add(u); s.flush()
-        p = Project(id=new_id(), owner_id=u.id, name="P2", template="plane_beach", settings_json="{}")
-        s.add(p); s.commit()
+        s.add(Project(id=new_id(), owner_id=u.id, name="P2", template="plane_beach", settings_json="{}"))
+        example = Project(id=new_id(), owner_id=None, name="Example", template="plane_beach", settings_json="{}")
+        s.add(example); s.commit()
         s.delete(u); s.commit()
-        assert s.get(Project, p.id).owner_id is None
+        assert [p.name for p in s.query(Project).all()] == ["Example"]
     finally:
         s.close()
 

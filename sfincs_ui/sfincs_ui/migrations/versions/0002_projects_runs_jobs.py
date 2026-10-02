@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("settings_json", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=_NOW, nullable=False),
         sa.Column("updated_at", sa.DateTime(), server_default=_NOW, nullable=False),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(

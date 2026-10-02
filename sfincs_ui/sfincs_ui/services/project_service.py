@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import json
-import logging
 import shutil
 from pathlib import Path
 
 from sfincs_ui.config import Config
 from sfincs_ui.exceptions import NotAllowed, NotFound, TemplateError
-from sfincs_ui.models import ACTIVE_JOB_STATUSES, Project, Run, User, new_id
+from sfincs_ui.models import Project, Run, User, new_id
 from sfincs_ui.services import access_control as ac
-from sfincs_ui.timeutil import utcnow
 
-logger = logging.getLogger(__name__)
 MAX_NAME = 100
 _ACTIVE_RUN_STATUSES = ("queued", "building", "running", "validating", "exporting")
 
