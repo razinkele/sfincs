@@ -147,8 +147,8 @@ sudo bash deploy/deploy_ui.sh --uninstall  # keeps /srv/sfincs-ui/workspace
 
 Order: deployer preflight and port refusals, clone, pip install, workspace
 and env file, preflight as `shiny`, migrate and `create-admin` as `shiny`
-(password prompted, or `SFINCS_UI_ADMIN_PASSWORD` in the environment of the
-sudo call), unit restart and local HTTP 200, nginx insert and reload, HTTPS
+(password prompted, or passed as
+`sudo SFINCS_UI_ADMIN_PASSWORD=… bash deploy/deploy_ui.sh`, since sudo's env_reset drops an exported variable), unit restart and local HTTP 200, nginx insert and reload, HTTPS
 smoke test of `/` and `/login`, catalogue made visible.
 
 Re-running is idempotent; `create-admin` does nothing when an admin exists.

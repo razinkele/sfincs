@@ -56,22 +56,22 @@ warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 fail() { echo -e "${RED}[x]${NC} $*" >&2; exit 1; }
 
 MODE="${1:-install}"
+case "$MODE" in install|--check|--restart|--uninstall) ;; *) fail "unknown mode '${MODE}'; use --check, --restart, --uninstall or no argument";; esac
 need_root() { [[ "$(id -u)" -eq 0 ]] || fail "must run as root:  sudo bash deploy/deploy_ui.sh ${*:-}"; }
 
 # Run a sfincs_ui CLI command as the service user with the unit's environment,
 # never as root, so the SQLite file and its -wal/-shm companions stay writable
 # by the service.
-# EXTRA_ENV holds additional KEY=VALUE items for one call (the admin password).
-# Each line of the env file is one array element, so values with spaces such as
-# SFINCS_UI_MODEL_PYTHON survive; never word-split the file into `env`.
-EXTRA_ENV=()
 as_shiny() {
     local -a env_args=()
     while IFS= read -r line; do
         [[ -z "$line" || "$line" == \#* ]] && continue
         env_args+=("$line")
     done < "$ENV_FILE"
-    sudo -u shiny env "${env_args[@]}" "${EXTRA_ENV[@]}" "$SHINY_PYTHON" -m sfincs_ui "$@"
+    # --preserve-env keeps an exported SFINCS_UI_ADMIN_PASSWORD out of argv
+    # (argv is world-readable in /proc on a shared box); sudo's env_reset
+    # would otherwise drop it.
+    sudo -u shiny --preserve-env=SFINCS_UI_ADMIN_PASSWORD env "${env_args[@]}" "$SHINY_PYTHON" -P -m sfincs_ui "$@"
 }
 
 render_template() {  # render_template <template> <dest>
@@ -85,7 +85,9 @@ render_template() {  # render_template <template> <dest>
 if [[ "$MODE" == "--check" ]]; then
     echo "SFINCS UI deployment state"
     echo "  prod clone     : $([[ -d $PROD_SRC/.git ]] && echo "present  $(git -C "$PROD_SRC" rev-parse --short HEAD 2>/dev/null)" || echo "ABSENT   $PROD_SRC")"
-    echo "  unit           : $(systemctl is-enabled "$SERVICE_NAME" 2>/dev/null || echo absent) / $(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo inactive)"
+    enabled="$(systemctl is-enabled "$SERVICE_NAME" 2>/dev/null)" || enabled="absent"
+    active="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null)" || active="inactive"
+    echo "  unit           : ${enabled} / ${active}"
     echo "  port ${PORT}      : $(ss -ltn 2>/dev/null | grep -q ":${PORT} " && echo bound || echo free)"
     echo "  nginx          : $(grep -qF "$NGINX_MARKER" "$NGINX_CONF" 2>/dev/null && echo registered || echo "NOT registered")"
     echo "  env file       : $([[ -f $ENV_FILE ]] && echo present || echo ABSENT)"
@@ -103,7 +105,8 @@ for cat in data["categories"]:
 print("ABSENT")
 PY
 )"
-    echo "  live URL       : $(curl -sk -o /dev/null -w '%{http_code}' "$PUBLIC_URL" || echo unreachable)"
+    live="$(curl -sk -o /dev/null -w '%{http_code}' "$PUBLIC_URL" 2>/dev/null)" || live="unreachable"
+    echo "  live URL       : ${live}"
     exit 0
 fi
 
@@ -115,7 +118,8 @@ if [[ "$MODE" == "--restart" ]]; then
     # MILESTONE 2: check the jobs table for an active simulate stage here and
     # wait for it or warn (spec section 3); detached stages survive the restart
     # thanks to KillMode=process, but the queue must be told to reconcile.
-    systemctl restart "$SERVICE_NAME" && info "restarted ${SERVICE_NAME}"
+    systemctl restart "$SERVICE_NAME" || fail "could not restart ${SERVICE_NAME}; see: journalctl -u ${SERVICE_NAME} -n 40"
+    info "restarted ${SERVICE_NAME}"
     exit 0
 fi
 
@@ -143,7 +147,8 @@ t2 = re.sub(pat, "\n", t, count=1, flags=re.S)
 if t2 == t: raise SystemExit("nginx block not found in the expected shape; remove it by hand")
 open(p, "w").write(t2)
 PY
-        nginx -t && systemctl reload nginx
+        nginx -t || fail "nginx config test FAILED after removing the block; restore ${NGINX_CONF}.bak.${STAMP}"
+        systemctl reload nginx
         info "nginx block removed (backup ${NGINX_CONF}.bak.${STAMP})"
     fi
     if [[ -f "$SERVICES_JSON" ]]; then
@@ -192,6 +197,7 @@ info "port ${PORT} is ours"
 
 # --- prod clone ------------------------------------------------------------
 git config --global --add safe.directory "$PROD_SRC" 2>/dev/null || true
+[[ -L "$PROD_SRC" ]] && fail "${PROD_SRC} is a symlink; prod must be a dedicated clone, never a link to a dev tree"
 if [[ -d "${PROD_SRC}/.git" ]]; then
     git -C "$PROD_SRC" fetch --quiet --prune origin
 elif [[ -e "$PROD_SRC" ]]; then
@@ -206,7 +212,7 @@ info "prod clone at ${DEPLOY_REF} (${DEPLOYED_SHA})"
 
 # --- install the package into the shiny env --------------------------------
 "${PIP_INSTALL[@]}" -e "${PROD_SRC}/sfincs_ui"
-"$SHINY_PYTHON" - <<'PY'
+"$SHINY_PYTHON" -P - <<'PY'
 import sys
 from importlib.metadata import version
 from packaging.version import Version
@@ -234,10 +240,9 @@ as_shiny preflight || fail "preflight failed; fix the reported paths before publ
 # --- migrations and the first admin, as shiny ------------------------------
 as_shiny migrate
 if [[ -n "${SFINCS_UI_ADMIN_PASSWORD:-}" ]]; then
-    EXTRA_ENV=("SFINCS_UI_ADMIN_PASSWORD=${SFINCS_UI_ADMIN_PASSWORD}")
+    export SFINCS_UI_ADMIN_PASSWORD
 fi
 as_shiny create-admin --username "$ADMIN_USERNAME"
-EXTRA_ENV=()
 for f in "${WORKSPACE}"/sfincs_ui.db "${WORKSPACE}"/sfincs_ui.db-wal "${WORKSPACE}"/sfincs_ui.db-shm; do
     [[ -e "$f" ]] && [[ "$(stat -c %U "$f")" != "shiny" ]] && fail "${f} is owned by $(stat -c %U "$f"), not shiny"
 done
@@ -246,7 +251,7 @@ info "database migrated and owned by shiny"
 # --- systemd unit ----------------------------------------------------------
 render_template "${DEPLOY_DIR}/sfincs-ui.service.in" "$SERVICE_FILE"
 systemctl daemon-reload
-systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
+systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || fail "could not enable ${SERVICE_NAME}"
 # MILESTONE 2: before restarting, check the jobs table for an active simulate
 # stage and wait for it or warn (spec section 3).
 systemctl restart "$SERVICE_NAME"
