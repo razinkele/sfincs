@@ -135,6 +135,33 @@ def test_deep_gauge_database_opens_read_only(layout, tmp_path, monkeypatch):
     assert not any("gauge database" in p.lower() for p in report.problems)
 
 
+def test_deep_unreadable_catalogue_is_a_problem_not_an_exception(layout, monkeypatch):
+    import os as _os
+
+    if _os.geteuid() == 0:
+        pytest.skip("root ignores permission bits")
+    (layout.curonian_dir / "inputs").mkdir()
+    cat = layout.curonian_dir / "data_catalog.yml"
+    cat.write_text("a:\n  path: /x\n")
+    cat.chmod(0o000)
+    monkeypatch.setenv("SFINCS_CURONIAN_DB", "/nonexistent.gpkg")
+    runner = _fake_runner({str(layout.sfincs_bin): (2, BANNER), "fake-python": (0, b"")})
+    try:
+        report = check_environment(layout, deep=True, runner=runner)
+    finally:
+        cat.chmod(0o644)
+    assert any("Catalogue not readable" in p for p in report.problems)
+
+
+def test_deep_catalogue_with_too_few_absolute_paths_is_reported(layout, monkeypatch):
+    (layout.curonian_dir / "inputs").mkdir()
+    (layout.curonian_dir / "data_catalog.yml").write_text("a:\n  path: relative/only.nc\n")
+    monkeypatch.setenv("SFINCS_CURONIAN_DB", "/nonexistent.gpkg")
+    runner = _fake_runner({str(layout.sfincs_bin): (2, BANNER), "fake-python": (0, b"")})
+    report = check_environment(layout, deep=True, runner=runner)
+    assert any("expected at least 3" in p for p in report.problems)
+
+
 def test_real_binary_prints_banner_if_present():
     """Runs the actual solver when this checkout has it; skipped elsewhere."""
     cfg = Config(workspace=Path("/tmp"))

@@ -25,6 +25,8 @@ BINARY_TIMEOUT_S = 15
 MODEL_ENV_TIMEOUT_S = 120
 BANNER = "Welcome to SFINCS"
 EVENTS = ("xaver_2013", "april_2013")
+# curonian/data_catalog.yml carries three absolute paths on this host (DEM, bathymetry, gauge database).
+EXPECTED_CATALOGUE_PATHS = 3
 
 _IMPORT_SNIPPET = "import hydromt_sfincs, rasterio"
 _GEOTIFF_SNIPPET = "import rasterio; rasterio.open({path!r}).close()"
@@ -96,9 +98,20 @@ def _check_deep(config: Config, runner, problems: list[str]) -> None:
             problems.append(f"Input not readable: inputs/{rel}")
     catalogue = config.curonian_dir / "data_catalog.yml"
     if catalogue.is_file():
-        for m in re.finditer(r"^\s*path:\s*(/\S+)", catalogue.read_text(), re.M):
-            if not os.access(m.group(1), os.R_OK):
-                problems.append(f"Catalogue path not readable: {m.group(1)}")
+        try:
+            text = catalogue.read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            problems.append(f"Catalogue not readable: {catalogue} ({exc})")
+        else:
+            paths = re.findall(r"^\s*path:\s*(/\S+)", text, re.M)
+            if len(paths) < EXPECTED_CATALOGUE_PATHS:
+                problems.append(
+                    f"Catalogue lists {len(paths)} absolute path(s), expected at least "
+                    f"{EXPECTED_CATALOGUE_PATHS} (DEM, bathymetry, gauge database): {catalogue}"
+                )
+            for p in paths:
+                if not os.access(p, os.R_OK):
+                    problems.append(f"Catalogue path not readable: {p}")
     if tif.is_file():
         _run_model_python(config, _GEOTIFF_SNIPPET.format(path=str(tif)), runner, "open a GeoTIFF with rasterio", problems)
     # The gauge database is read by validate.py and export_map_cache (milestone
