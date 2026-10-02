@@ -4146,7 +4146,43 @@ sudo call), unit restart and local HTTP 200, nginx insert and reload, HTTPS
 smoke test of `/` and `/login`, catalogue made visible.
 
 Re-running is idempotent; `create-admin` does nothing when an admin exists.
-````, CLI,
+````
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd /home/razinka/sfincs
+git add deploy/deploy_ui.sh deploy/sfincs-ui.service.in deploy/sfincs-ui.env.in deploy/sfincs-ui.nginx deploy/services-entry-ui.json deploy/README.md
+git commit -m "deploy: deploy_ui.sh with the sfincs-ui unit (KillMode=process), nginx block and catalogue entry
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+- [ ] **Step 9: User-run acceptance (not the executor's)**
+
+The user runs, in this session: `! sudo bash deploy/deploy_ui.sh` (the script prompts for the admin password unless `SFINCS_UI_ADMIN_PASSWORD` is set in the sudo environment). Then opens https://laguna.ku.lt/sfincs-ui/, logs in as the admin, sees the Admin tab with Users, Queue policy and Audit log, and the audit log shows the `login_success` row. Verify afterwards with `bash deploy/deploy_ui.sh --check` and `systemctl show sfincs-ui -p KillMode` printing `KillMode=process`. The push to `origin/main` must happen before the deploy, since the prod clone fetches from GitHub.
+
+---
+
+### Task 11: Package README and final verification
+
+**Files:**
+- Create: `sfincs_ui/README.md`
+- Modify: `README.md` (repo root; one paragraph in the layout table pointing at `sfincs_ui/`)
+
+**Interfaces:** none new.
+
+- [ ] **Step 1: Write the package README**
+
+`sfincs_ui/README.md`:
+
+```markdown
+# sfincs_ui
+
+Web app for laguna.ku.lt through which a logged-in user creates a SFINCS
+project from a template, launches a simulation on the server and inspects the
+results. Design: `docs/superpowers/specs/2026-09-30-sfincs-ui-design.md`.
+Milestone 1 (this state): configuration, database, auth, Admin page, CLI,
 service unit and deploy script. Projects, runs and the queue arrive in
 milestone 2.
 
