@@ -7,7 +7,7 @@ from sfincs_ui.services.environment import EnvironmentReport
 
 def test_migrate_creates_schema(db, capsys):
     assert cli.main(["migrate"]) == 0
-    assert "0001_initial" in capsys.readouterr().out
+    assert "0002_projects_runs_jobs" in capsys.readouterr().out
 
 
 def test_create_admin_from_env(db, monkeypatch, capsys):

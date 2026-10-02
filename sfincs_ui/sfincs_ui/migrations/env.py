@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool
 
 from sfincs_ui.db.base import Base
 from sfincs_ui.models import audit_log  # noqa: F401
+from sfincs_ui.models import project  # noqa: F401
 from sfincs_ui.models import setting  # noqa: F401
 from sfincs_ui.models import user  # noqa: F401
 

@@ -14,10 +14,10 @@ def _head_revision() -> str:
 def test_fresh_db_is_migrated_to_head(db):
     engine = base.get_engine()
     tables = set(inspect(engine).get_table_names())
-    assert {"users", "sessions", "ws_tokens", "audit_log", "settings", "alembic_version"} <= tables
+    assert {"users", "sessions", "ws_tokens", "audit_log", "settings", "projects", "runs", "jobs", "alembic_version"} <= tables
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == _head_revision() == "0001_initial"
+    assert version == _head_revision() == "0002_projects_runs_jobs"
 
 
 def test_init_db_is_idempotent(db):
