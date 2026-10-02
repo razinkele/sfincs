@@ -52,3 +52,4 @@ must import every model module or autogenerate proposes dropping its tables
 ## Deployment
 
 `sudo bash deploy/deploy_ui.sh` from the repo root; see `deploy/README.md`.
+Merge to main and push to origin before deploying; the prod clone fetches `origin/main`.

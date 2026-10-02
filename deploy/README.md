@@ -145,10 +145,21 @@ sudo bash deploy/deploy_ui.sh --uninstall  # keeps /srv/sfincs-ui/workspace
 | `/etc/nginx/sites-available/nid4ocean` | `location /sfincs-ui/` before "Database Admin Tools" | `.bak.<stamp>` |
 | `/var/www/html/services.json` | catalogue entry `sfincs-ui`, visible after the smoke test | `.bak-<stamp>` |
 
+Merge to main and push to origin before deploying; the prod clone fetches `origin/main`.
+
 Order: deployer preflight and port refusals, clone, pip install, workspace
-and env file, preflight as `shiny`, migrate and `create-admin` as `shiny`
-(password prompted, or passed as
-`sudo SFINCS_UI_ADMIN_PASSWORD=… bash deploy/deploy_ui.sh`, since sudo's env_reset drops an exported variable), unit restart and local HTTP 200, nginx insert and reload, HTTPS
-smoke test of `/` and `/login`, catalogue made visible.
+and env file, preflight as `shiny`, migrate and `create-admin` as `shiny`,
+unit restart and local HTTP 200, nginx insert and reload, HTTPS smoke test of
+`/` and `/login`, catalogue made visible.
+
+The admin password is prompted by default (getpass, which works through
+`sudo -u shiny` when the deploy runs from a terminal). For a non-interactive
+run, read it into the environment without echo and let sudo pass it through,
+so it never appears in a process's argv or in shell history:
+
+```bash
+read -rs SFINCS_UI_ADMIN_PASSWORD; export SFINCS_UI_ADMIN_PASSWORD
+sudo --preserve-env=SFINCS_UI_ADMIN_PASSWORD bash deploy/deploy_ui.sh
+```
 
 Re-running is idempotent; `create-admin` does nothing when an admin exists.
