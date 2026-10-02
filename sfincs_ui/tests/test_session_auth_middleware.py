@@ -258,3 +258,70 @@ class TestSessionTokenContextvar:
         await SessionAuthMiddleware(app, MagicMock())(_scope(), AsyncMock(), AsyncMock())
         assert seen["token"] is None
 
+
+class TestLoginHardening:
+    async def test_non_ascii_csrf_token_rerenders_form(self):
+        auth = MagicMock(); auth.authenticate.return_value = None
+        mw = SessionAuthMiddleware(AsyncMock(), auth)
+        receive = AsyncMock(return_value={"type": "http.request", "body": b"username=a&password=b&csrf_token=%C3%A9", "more_body": False})
+        send = AsyncMock()
+        # The cookie header is latin-1 decoded; these bytes arrive as a non-ASCII str.
+        scope = _scope(method="POST", path="/login", headers=[(b"cookie", f"{CSRF_COOKIE}=".encode() + "é".encode("utf-8"))])
+        await mw(scope, receive, send)
+        start, body = _responses(send)
+        assert start["status"] == 200 and b'name="csrf_token"' in body["body"]
+
+    async def test_non_ascii_matching_csrf_is_compared_not_crashed(self):
+        auth = MagicMock(); auth.authenticate.return_value = None
+        mw = SessionAuthMiddleware(AsyncMock(), auth)
+        receive = AsyncMock(return_value={"type": "http.request", "body": b"username=a&password=b&csrf_token=%C3%A9", "more_body": False})
+        send = AsyncMock()
+        # Form decodes %C3%A9 as UTF-8 and the cookie b"\xe9" as latin-1: both are "\u00e9".
+        scope = _scope(method="POST", path="/login", headers=[(b"cookie", f"{CSRF_COOKIE}=".encode() + b"\xe9")])
+        await mw(scope, receive, send)
+        start, body = _responses(send)
+        assert start["status"] == 200 and b'name="csrf_token"' in body["body"]
+        auth.authenticate.assert_called_once_with("a", "b")
+
+    async def test_login_page_is_no_store_and_not_frameable(self):
+        send = AsyncMock()
+        await SessionAuthMiddleware(AsyncMock(), MagicMock())(_scope(path="/login"), AsyncMock(), send)
+        headers = dict(_responses(send)[0]["headers"])
+        assert headers[b"cache-control"] == b"no-store"
+        assert headers[b"content-security-policy"] == b"frame-ancestors 'self'"
+
+    async def test_whoami_is_no_store(self):
+        auth = MagicMock(); auth.validate_session.return_value = None
+        send = AsyncMock()
+        await SessionAuthMiddleware(AsyncMock(), auth)(_scope(path="/api/whoami"), AsyncMock(), send)
+        assert dict(_responses(send)[0]["headers"])[b"cache-control"] == b"no-store"
+
+    async def test_logout_page_is_no_store(self):
+        send = AsyncMock()
+        await SessionAuthMiddleware(AsyncMock(), MagicMock())(_scope(path="/logout"), AsyncMock(), send)
+        assert dict(_responses(send)[0]["headers"])[b"cache-control"] == b"no-store"
+
+    async def test_authenticate_runs_off_the_event_loop(self):
+        import threading
+
+        loop_thread = threading.get_ident()
+        seen = {}
+
+        def authenticate(username, password):
+            seen["thread"] = threading.get_ident()
+            return None
+
+        auth = MagicMock(); auth.authenticate.side_effect = authenticate
+        mw = SessionAuthMiddleware(AsyncMock(), auth)
+        receive = AsyncMock(return_value={"type": "http.request", "body": b"username=a&password=b&csrf_token=abc", "more_body": False})
+        await mw(_scope(method="POST", path="/login", cookies=f"{CSRF_COOKIE}=abc"), receive, AsyncMock())
+        assert seen["thread"] != loop_thread
+
+    async def test_failed_login_username_truncated_in_audit(self):
+        auth = MagicMock(); auth.authenticate.return_value = None
+        audit = MagicMock()
+        mw = SessionAuthMiddleware(AsyncMock(), auth, audit_service=audit)
+        long_name = "x" * 500
+        receive = AsyncMock(return_value={"type": "http.request", "body": f"username={long_name}&password=b&csrf_token=abc".encode(), "more_body": False})
+        await mw(_scope(method="POST", path="/login", cookies=f"{CSRF_COOKIE}=abc"), receive, AsyncMock())
+        assert audit.log.call_args.kwargs["username"] == "x" * 64

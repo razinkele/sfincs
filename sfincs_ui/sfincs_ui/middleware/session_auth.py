@@ -17,6 +17,9 @@ import secrets
 import urllib.parse
 from html import escape
 
+import anyio
+import anyio.to_thread
+
 from sfincs_ui.middleware.client_ip import get_client_ip
 
 logger = logging.getLogger(__name__)
@@ -24,6 +27,12 @@ logger = logging.getLogger(__name__)
 SESSION_COOKIE = "sfincs_ui_session"
 CSRF_COOKIE = "sfincs_ui_csrf"
 _MAX_FORM_BODY = 16 * 1024
+_AUDIT_USERNAME_MAX = 64
+_NO_STORE = (b"cache-control", b"no-store")
+# argon2 verification and the SQLite lookup run in worker threads so a burst
+# of anonymous POST /login cannot freeze every live websocket; two at a time
+# bounds the CPU and memory an attacker can make the server spend.
+_LOGIN_LIMITER = anyio.CapacityLimiter(2)
 
 _user_var: contextvars.ContextVar[dict | None] = contextvars.ContextVar("sfincs_ui_user", default=None)
 _token_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("sfincs_ui_session_token", default=None)
@@ -184,7 +193,10 @@ class SessionAuthMiddleware:
         await send({
             "type": "http.response.start",
             "status": status,
-            "headers": [(b"content-type", b"text/html; charset=utf-8"), (b"content-length", str(len(body)).encode()), *extra_headers],
+            "headers": [
+                (b"content-type", b"text/html; charset=utf-8"), (b"content-length", str(len(body)).encode()),
+                _NO_STORE, *extra_headers,
+            ],
         })
         await send({"type": "http.response.body", "body": body})
 
@@ -199,7 +211,7 @@ class SessionAuthMiddleware:
         await send({
             "type": "http.response.start",
             "status": 200,
-            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()), _NO_STORE],
         })
         await send({"type": "http.response.body", "body": body})
 
@@ -211,7 +223,10 @@ class SessionAuthMiddleware:
             csrf_token=csrf,
             home=f"{root_path}/",
         )
-        await self._serve_html(send, html, extra_headers=[(b"set-cookie", self._cookie(CSRF_COOKIE, csrf, root_path, 600))])
+        await self._serve_html(send, html, extra_headers=[
+            (b"set-cookie", self._cookie(CSRF_COOKIE, csrf, root_path, 600)),
+            (b"content-security-policy", b"frame-ancestors 'self'"),
+        ])
 
     async def _read_form(self, receive) -> dict[str, str]:
         body = b""
@@ -230,13 +245,14 @@ class SessionAuthMiddleware:
         ip = get_client_ip(scope, self.trusted_proxies)
         form_csrf = form.get("csrf_token", "")
         cookie_csrf = _cookie_header(scope).get(CSRF_COOKIE, "")
-        if not form_csrf or not cookie_csrf or not secrets.compare_digest(form_csrf, cookie_csrf):
+        # Compare as bytes: compare_digest raises TypeError on non-ASCII str.
+        if not form_csrf or not cookie_csrf or not secrets.compare_digest(form_csrf.encode(), cookie_csrf.encode()):
             await self._serve_login(send, root_path, error="Invalid request. Please try again.")
             return
         username, password = form.get("username", ""), form.get("password", "")
-        user = self.auth_service.authenticate(username, password)
+        user = await anyio.to_thread.run_sync(self.auth_service.authenticate, username, password, limiter=_LOGIN_LIMITER)
         if user is None:
-            self._audit(username or "<empty>", "login_failed", ip_address=ip)
+            self._audit((username or "<empty>")[:_AUDIT_USERNAME_MAX], "login_failed", ip_address=ip)
             await self._serve_login(send, root_path, error="Invalid username or password.")
             return
         self._audit(user["username"], "login_success", ip_address=ip, user_id=user["id"])

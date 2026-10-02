@@ -47,6 +47,8 @@ def test_all_good_shallow(layout):
     bin_call = next(c for c in runner.calls if c[0][0] == str(layout.sfincs_bin))
     assert Path(bin_call[1]["cwd"]).exists() is False  # temp dir removed afterwards
     assert bin_call[1]["timeout"] == 15
+    model_call = next(c for c in runner.calls if c[0][0] == "fake-python")
+    assert model_call[1]["timeout"] == 20
 
 
 def test_missing_binary_reported(layout):
@@ -67,10 +69,10 @@ def test_model_python_timeout_reported(layout):
     """Review Focus 4: a dead micromamba must not hang startup."""
     runner = _fake_runner({
         str(layout.sfincs_bin): (2, BANNER),
-        "fake-python": subprocess.TimeoutExpired(cmd="fake-python", timeout=120),
+        "fake-python": subprocess.TimeoutExpired(cmd="fake-python", timeout=20),
     })
     report = check_environment(layout, runner=runner)
-    assert any("model environment" in p.lower() and "timed out" in p.lower() for p in report.problems)
+    assert any("model environment" in p.lower() and "timed out after 20 s" in p.lower() for p in report.problems)
 
 
 def test_model_python_import_failure_reported(layout):
@@ -121,6 +123,11 @@ def test_deep_checks_inputs_and_catalogue(layout, tmp_path, monkeypatch):
     # deep mode asked the model env to open the GeoTIFF
     snippets = [c[0][-1] for c in runner.calls if c[0][0] == "fake-python"]
     assert any("rasterio.open" in s for s in snippets)
+    # deep checks keep the long timeout; only the startup import check is short
+    geotiff_call = next(c for c in runner.calls if c[0][0] == "fake-python" and "rasterio.open" in c[0][-1])
+    assert geotiff_call[1]["timeout"] == 120
+    import_call = next(c for c in runner.calls if c[0][0] == "fake-python" and "hydromt_sfincs" in c[0][-1])
+    assert import_call[1]["timeout"] == 120
 
 
 def test_deep_gauge_database_opens_read_only(layout, tmp_path, monkeypatch):

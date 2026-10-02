@@ -23,6 +23,9 @@ from sfincs_ui.timeutil import utcnow
 
 BINARY_TIMEOUT_S = 15
 MODEL_ENV_TIMEOUT_S = 120
+# The startup import check runs before the app serves; a wedged micromamba must
+# cost seconds, not minutes (plan Review Focus 4). Deep checks keep 120 s.
+MODEL_ENV_STARTUP_TIMEOUT_S = 20
 BANNER = "Welcome to SFINCS"
 EVENTS = ("xaver_2013", "april_2013")
 # curonian/data_catalog.yml carries three absolute paths on this host (DEM, bathymetry, gauge database).
@@ -43,12 +46,13 @@ class EnvironmentReport:
         return not self.problems
 
 
-def _run_model_python(config: Config, snippet: str, runner, label: str, problems: list[str]) -> None:
+def _run_model_python(config: Config, snippet: str, runner, label: str, problems: list[str],
+                      timeout: int = MODEL_ENV_TIMEOUT_S) -> None:
     argv = [*config.model_python_argv, "-c", snippet]
     try:
-        proc = runner(argv, cwd=str(config.curonian_dir), capture_output=True, timeout=MODEL_ENV_TIMEOUT_S)
+        proc = runner(argv, cwd=str(config.curonian_dir), capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        problems.append(f"Model environment check ({label}) timed out after {MODEL_ENV_TIMEOUT_S} s: {config.model_python}")
+        problems.append(f"Model environment check ({label}) timed out after {timeout} s: {config.model_python}")
         return
     except (OSError, FileNotFoundError) as exc:
         problems.append(f"Model environment command cannot start: {config.model_python} ({exc})")
@@ -127,7 +131,9 @@ def _check_deep(config: Config, runner, problems: list[str]) -> None:
 def check_environment(config: Config, *, deep: bool = False, runner=subprocess.run) -> EnvironmentReport:
     problems: list[str] = []
     _check_binary(config, runner, problems)
-    _run_model_python(config, _IMPORT_SNIPPET, runner, "import hydromt_sfincs and rasterio", problems)
+    # The deploy preflight (deep) may meet a cold micromamba cache; give it the long timeout.
+    _run_model_python(config, _IMPORT_SNIPPET, runner, "import hydromt_sfincs and rasterio", problems,
+                      timeout=MODEL_ENV_TIMEOUT_S if deep else MODEL_ENV_STARTUP_TIMEOUT_S)
     _check_dirs(config, problems)
     if deep:
         _check_deep(config, runner, problems)
