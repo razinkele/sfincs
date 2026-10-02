@@ -22,3 +22,5 @@ test_model*/sfincs_log.txt
 test_model*/sfincs.log
 test_model_hydromt/gis/
 .superpowers/
+*.egg-info/
+sfincs_ui/.pytest_cache/
