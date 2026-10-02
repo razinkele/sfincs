@@ -240,6 +240,10 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
             except ValueError as exc:
                 _notify_error(exc)
                 return
+            except Exception:
+                logger.exception("_do_reset_pw failed")
+                ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
+                return
             if not ok:
                 ui.notification_show("User not found", type="error")
                 return
@@ -262,6 +266,9 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
                 _refresh_users()
             except ValueError as exc:
                 _notify_error(exc)
+            except Exception:
+                logger.exception("_toggle_active failed")
+                ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
         @reactive.effect
         @reactive.event(input[f"toggle_role_{uid}"])
@@ -279,6 +286,9 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
                 _refresh_users()
             except ValueError as exc:
                 _notify_error(exc)
+            except Exception:
+                logger.exception("_toggle_role failed")
+                ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
         @reactive.effect
         @reactive.event(input[f"delete_user_{uid}"])
@@ -306,6 +316,9 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
                 ui.modal_remove()
             except ValueError as exc:
                 _notify_error(exc)
+            except Exception:
+                logger.exception("_do_delete_user failed")
+                ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
     @reactive.effect
     def _register_all_user_actions():
@@ -355,6 +368,10 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
         except ValueError as exc:
             create_errors.set([str(exc)])
             return
+        except Exception:
+            logger.exception("_do_create_user failed")
+            ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
+            return
         create_errors.set([])
         _audit(actor, "create_user", target=f"user:{username}", detail={"role": role})
         _refresh_users()
@@ -390,6 +407,10 @@ def admin_server(input, output, session, auth_service: AuthService, audit_servic
                 settings_service.set(key, change["new"])
         except (ValueError, TypeError) as exc:
             _notify_error(exc)
+            return
+        except Exception:
+            logger.exception("_save_policy failed")
+            ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
             return
         if changed:
             _audit(actor, "settings_update", target="queue_policy", detail=changed)

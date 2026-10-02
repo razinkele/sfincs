@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 
 from shiny import module, reactive, render, ui
 
 from sfincs_ui.exceptions import SfincsUiError
 from sfincs_ui.templates import TEMPLATES
 
+logger = logging.getLogger(__name__)
 
 
 @module.ui
@@ -101,6 +103,9 @@ def projects_server(input, output, session, project_service, current_user, activ
                 ui.notification_show(f"Cloned as {p['name']}", type="message")
             except SfincsUiError as exc:
                 _notify(exc)
+            except Exception:
+                logger.exception("_clone failed")
+                ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
         @reactive.effect
         @reactive.event(input[f"rename_{pid}"])
@@ -119,6 +124,9 @@ def projects_server(input, output, session, project_service, current_user, activ
                 ui.modal_remove(); _refresh()
             except SfincsUiError as exc:
                 _notify(exc)
+            except Exception:
+                logger.exception("_do_rename failed")
+                ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
         @reactive.effect
         @reactive.event(input[f"delete_{pid}"])
@@ -139,6 +147,9 @@ def projects_server(input, output, session, project_service, current_user, activ
                 ui.modal_remove(); _refresh()
             except SfincsUiError as exc:
                 _notify(exc)
+            except Exception:
+                logger.exception("_do_delete failed")
+                ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
     @reactive.effect
     @reactive.event(input.new_project_btn)
@@ -160,6 +171,9 @@ def projects_server(input, output, session, project_service, current_user, activ
             active_project.set(p["id"]); ui.modal_remove(); _refresh(); goto("Setup")
         except SfincsUiError as exc:
             _notify(exc)
+        except Exception:
+            logger.exception("_do_new failed")
+            ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
 
 def _safe(project_id: str) -> str:

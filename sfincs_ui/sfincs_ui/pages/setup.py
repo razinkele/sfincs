@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 
 from shiny import module, reactive, render, ui
 
@@ -9,6 +10,7 @@ from sfincs_ui.exceptions import SfincsUiError
 from sfincs_ui.templates import get_template
 from sfincs_ui.templates.base import SettingField
 
+logger = logging.getLogger(__name__)
 
 
 def render_field(field: SettingField, value) -> ui.Tag:
@@ -96,6 +98,9 @@ def setup_server(input, output, session, project_service, run_service, settings_
             ui.notification_show("Settings saved", type="message")
         except SfincsUiError as exc:
             _notify(exc)
+        except Exception:
+            logger.exception("_save failed")
+            ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
     @reactive.effect
     @reactive.event(input.launch_btn)
@@ -127,3 +132,6 @@ def setup_server(input, output, session, project_service, run_service, settings_
             ui.notification_show(f"Launched {run['name']}", type="message")
         except SfincsUiError as exc:
             _notify(exc)
+        except Exception:
+            logger.exception("_do_launch failed")
+            ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)

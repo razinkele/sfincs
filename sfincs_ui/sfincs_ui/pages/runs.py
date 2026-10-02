@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 
 from shiny import module, reactive, render, ui
 
 from sfincs_ui.exceptions import SfincsUiError
 from sfincs_ui.services import access_control as ac
+
+logger = logging.getLogger(__name__)
 
 _ACTIVE = ("queued", "building", "running", "validating", "exporting")
 _BADGE = {"finished": "bg-success", "failed": "bg-danger", "cancelled": "bg-dark", "orphaned": "bg-dark",
@@ -185,6 +188,9 @@ def runs_server(input, output, session, run_service, current_user, active_run):
             ui.notification_show("Run cancelled", type="message")
         except SfincsUiError as exc:
             _notify(exc)
+        except Exception:
+            logger.exception("_cancel failed")
+            ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
     @reactive.effect
     @reactive.event(input.pin_btn)
@@ -196,6 +202,9 @@ def runs_server(input, output, session, run_service, current_user, active_run):
             run_service.set_pinned(current_user(), r["id"], not r["pinned"]); _refresh()
         except SfincsUiError as exc:
             _notify(exc)
+        except Exception:
+            logger.exception("_pin failed")
+            ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
     @reactive.effect
     @reactive.event(input.public_btn)
@@ -207,6 +216,9 @@ def runs_server(input, output, session, run_service, current_user, active_run):
             run_service.set_public(current_user(), r["id"], not r["public"]); _refresh()
         except SfincsUiError as exc:
             _notify(exc)
+        except Exception:
+            logger.exception("_public failed")
+            ui.notification_show("Something went wrong; the error has been logged", type="error", duration=8)
 
     @render.ui
     def download_box():
