@@ -1,5 +1,3 @@
-import json
-
 from sfincs_ui.services.model_service import OVERRIDES_DIFF, apply_overrides, read_settings, write_overrides, write_settings
 
 INP = """\

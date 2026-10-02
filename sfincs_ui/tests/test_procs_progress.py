@@ -28,28 +28,83 @@ def test_proc_starttime_and_is_alive(sleeper):
     assert proc_starttime(2**22 - 1) is None and not is_alive(2**22 - 1, 1)
 
 
-def test_proc_starttime_parses_comm_with_spaces_and_parens():
-    # /proc/self/stat for a process named "a b) c" still parses: split after the LAST ')'
-    st = proc_starttime(os.getpid())
-    stat = open(f"/proc/{os.getpid()}/stat").read()
-    assert st == int(stat.rsplit(")", 1)[1].split()[19])
-
-
-def test_killpg_graceful_terminates_then_kills(sleeper):
-    # the child ignores SIGTERM, so the helper must escalate to SIGKILL
-    stubborn = subprocess.Popen([sys.executable, "-c", "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"],
-                                start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def test_proc_starttime_parses_comm_with_spaces_and_parens(tmp_path):
+    """A process whose name contains spaces and ')' must still parse: split after the LAST ')'."""
+    link = tmp_path / "a b) c"
+    link.symlink_to(sys.executable)
+    proc = subprocess.Popen([str(link), "-c", "import time; time.sleep(60)"], start_new_session=True,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        time.sleep(0.5)
-        assert killpg_graceful(sleeper.pid, grace_s=5) == "terminated"
+        time.sleep(0.2)
+        assert ")" in open(f"/proc/{proc.pid}/comm").read()
+        stat = open(f"/proc/{proc.pid}/stat").read()
+        naive = int(stat.split(")", 1)[1].split()[19])      # splitting on the FIRST ')' gives the wrong field
+        correct = int(stat.rsplit(")", 1)[1].split()[19])
+        assert proc_starttime(proc.pid) == correct and naive != correct
+    finally:
+        os.killpg(proc.pid, signal.SIGKILL); proc.wait()
+
+
+def _start(code: str) -> subprocess.Popen:
+    """Start a python child in its own session and wait for it to print 'ready'."""
+    proc = subprocess.Popen([sys.executable, "-u", "-c", code], start_new_session=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    assert proc.stdout.readline().strip() == "ready"
+    return proc
+
+
+def test_is_alive_false_for_unreaped_zombie():
+    proc = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    st = proc_starttime(proc.pid)
+    time.sleep(1.0)  # the child has exited; nobody has called wait(), so it is a zombie
+    try:
+        assert open(f"/proc/{proc.pid}/stat").read().rsplit(")", 1)[1].split()[0] == "Z"
+        assert not is_alive(proc.pid, st)
+    finally:
+        proc.wait()
+
+
+def test_killpg_graceful_terminates_then_kills():
+    polite = _start("print('ready'); import time; time.sleep(60)")
+    stubborn = _start("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready'); time.sleep(60)")
+    try:
+        assert killpg_graceful(polite.pid, grace_s=5) == "terminated"
         assert killpg_graceful(stubborn.pid, grace_s=1) == "killed"
         stubborn.wait()  # reap: a zombie still answers killpg, so "gone" needs the exit collected
         assert killpg_graceful(stubborn.pid, grace_s=1) == "gone"
     finally:
-        for p in (sleeper, stubborn):
+        for p in (polite, stubborn):
             if p.poll() is None:
                 os.killpg(p.pid, signal.SIGKILL)
             p.wait()
+
+
+def test_killpg_graceful_waits_for_grandchildren():
+    """The leader exits on SIGTERM but its child ignores it: the GROUP must be escalated to SIGKILL."""
+    leader = _start(
+        "import os, signal, subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'])\n"
+        "time.sleep(0.5); print('ready'); time.sleep(60)"
+    )
+    try:
+        assert killpg_graceful(leader.pid, grace_s=1.5) == "killed"
+        time.sleep(0.3)
+        from sfincs_ui.services.procs import _group_alive
+        assert not _group_alive(leader.pid)
+    finally:
+        try:
+            os.killpg(leader.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        leader.wait()
+
+
+def test_killpg_graceful_refuses_dangerous_pids():
+    with pytest.raises(ValueError):
+        killpg_graceful(0)
+    with pytest.raises(ValueError):
+        killpg_graceful(1)
 
 
 def test_parse_progress():
