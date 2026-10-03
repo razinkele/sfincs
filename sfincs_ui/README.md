@@ -156,4 +156,9 @@ sudo -u shiny ls $RUN/map_meta.json $RUN/validation/gauge_obs.csv $RUN/validatio
 
 Expected: `CRITERIA MATCH` (the met/not-met lines are identical to the published baseline; the per-station numbers may differ in the second decimal because the published run used the pre-flag build path, record any difference), and the three files exist. `journalctl -u sfincs-ui --since "-2h" | grep -c Traceback` is 0.
 
-Measured: build duration, simulate duration and diff outcome to be recorded after the first deployed run.
+Measured on 2026-10-03 (first deployed run, 16 threads, defaults): build 6 min 06 s, simulate 38 min 04 s,
+validate 12 s, export 10 s; `CRITERIA MATCH` (C1 met, C2 met, C3 info, both context lines info, identical to the
+baseline). The per-station metrics differ by more than the second decimal and are slightly better than the
+published run (for example Vente RMSE 0.08 m vs 0.10 m over the full period, Uostadvaris peak error -0.00 m vs
++0.07 m); the published results predate later pipeline changes, so the baseline should be regenerated from the
+current pipeline in milestone 4 before metrics are compared numerically.
