@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from shiny import App, reactive, render, ui
+from shiny_deckgl import head_includes
 
 from sfincs_ui.config import Config, get_config, set_config
 from sfincs_ui.db.base import init_db
@@ -59,6 +60,7 @@ def build_ui(config: Config, report: EnvironmentReport) -> ui.Tag:
         title="SFINCS UI",
         id="main_nav",
         header=ui.TagList(
+            head_includes(),
             ui.head_content(ui.tags.link(rel="stylesheet", href="sfincs_ui.css"), ui.tags.script(_WS_IDENTITY_JS)),
             _banner(report),
         ),

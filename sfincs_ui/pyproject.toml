@@ -18,6 +18,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "uvicorn>=0.30",
     "pyproj>=3.6",
+    "shiny-deckgl>=1.9",
 ]
 
 [project.optional-dependencies]

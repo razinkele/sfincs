@@ -39,6 +39,14 @@ def progress_bar(progress: dict | None):
     return ui.div(ui.div(label, class_="progress-bar", role="progressbar", style=f"width: {pct}%"), class_="progress mb-2")
 
 
+def skipped_alert(summary: dict | None):
+    skipped = (summary or {}).get("skipped") or {}
+    if not skipped:
+        return None
+    return ui.div(ui.strong("Skipped: "), ", ".join(f"{stage} ({reason})" for stage, reason in skipped.items()),
+                  class_="alert alert-secondary py-2")
+
+
 @module.ui
 def runs_ui() -> ui.Tag:
     return ui.div(
@@ -135,6 +143,8 @@ def runs_server(input, output, session, run_service, current_user, active_run):
         if r["status"] == "failed" and r["summary"]:
             parts.append(ui.div(ui.strong(f"Failed in {r['summary']['stage']}: {r['summary']['reason']}"),
                                 ui.pre(r["summary"]["log_tail"], class_="small"), class_="alert alert-danger"))
+        if r["status"] == "finished":
+            parts.append(skipped_alert(r["summary"]))
         return ui.div(*parts)
 
     @render.ui

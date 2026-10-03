@@ -45,6 +45,12 @@ class TestRendering:
         assert "SFINCS UI" in html and "env-banner" not in html
         assert 'id="main_nav"' in html and "dark_mode" in html
 
+    def test_build_ui_includes_deckgl_assets(self, tmp_path):
+        from sfincs_ui.app import build_ui
+
+        html = str(build_ui(Config(workspace=tmp_path), EnvironmentReport()))
+        assert "deck" in html.lower()
+
     def test_identity_script_always_pushes_wsauth(self):
         # ui.head_content is hoisted out of str(Tag), so assert on the script source.
         from sfincs_ui.app import _WS_IDENTITY_JS

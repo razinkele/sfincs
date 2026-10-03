@@ -48,3 +48,14 @@ def test_runs_helpers():
     assert runs.format_stages(stages) == ["build: completed (exit 0)", "simulate: running"]
     assert "45%" in str(runs.progress_bar({"percent": 45, "remaining_s": 120.0})) and "2.0 min" in str(runs.progress_bar({"percent": 45, "remaining_s": 120.0}))
     assert str(runs.progress_bar(None)) == ""
+
+
+def test_render_optional_and_datetime_fields():
+    tpl = get_template("curonian")
+    fields = {f.key: f for f in tpl.fields()}
+    html = str(setup.render_field(fields["dtmax"], None))
+    assert 'type="number"' in html and "empty: model default" in html and "changed" not in html
+    assert "changed" in str(setup.render_field(fields["dtmax"], 30.0))
+    html = str(setup.render_field(fields["tstop"], None))
+    assert 'type="text"' in html and 'placeholder="YYYY-MM-DD HH:MM"' in html
+    assert 'value="2013-12-09 06:00"' in str(setup.render_field(fields["tstop"], "2013-12-09 06:00"))
