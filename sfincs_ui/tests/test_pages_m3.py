@@ -6,7 +6,7 @@ from sfincs_ui.templates import get_template
 
 def test_setup_ui_has_the_map_slot():
     html = str(setup.setup_ui("setup"))
-    assert "setup-map" in html and "setup-map_message" in html
+    assert 'id="setup-map"' in html and "setup-map_message" in html
 
 
 def test_setup_map_ignores_local_crs_layers():
@@ -33,7 +33,7 @@ def test_map_layers_shapes():
     assert stations["data"] == [{"position": [21.1, 55.3], "name": "Nida"}, {"position": [21.2, 55.4], "name": "Vente"}]
     assert stations["pickable"] is True
     # snake_case kwargs would be passed through unconverted and ignored by deck.gl
-    assert stations["getPosition"] == "@@=position" and stations["getRadius"] == 300 and stations["getFillColor"] == [220, 40, 40, 220]
+    assert stations["getPosition"] == "@@=d.position" and stations["getRadius"] == 300 and stations["getFillColor"] == [220, 40, 40, 220]
     assert not any("_" in k for l in layers for k in l)
     assert layers[0]["getFillColor"] == [30, 120, 200, 40] and layers[1]["getLineColor"] == [200, 80, 30, 220]
 

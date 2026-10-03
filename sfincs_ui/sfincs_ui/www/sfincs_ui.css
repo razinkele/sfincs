@@ -1,4 +1,4 @@
 .env-banner { border-radius: 0; margin-bottom: 0; }
 .navbar .form-check { margin: 0 .5rem; }
 
-.setup-side .deckgl-map, .setup-side canvas { min-height: 420px; }
+.setup-side .deckgl-map { min-height: 420px; }

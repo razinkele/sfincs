@@ -68,7 +68,7 @@ def map_layers(layers: list[dict]) -> list:
             out.append(geojson_layer(id=name, data=feature, stroked=True, filled=False, getLineColor=[200, 80, 30, 220], lineWidthMinPixels=2))
         elif geom["type"] in ("MultiPoint", "Point"):
             radius, colour = _POINT_STYLE.get(name, (300, [120, 120, 120, 220]))
-            out.append(scatterplot_layer(id=name, data=_points(layer), getPosition="@@=position", getRadius=radius,
+            out.append(scatterplot_layer(id=name, data=_points(layer), getPosition="@@=d.position", getRadius=radius,
                                          getFillColor=colour, pickable=True, radiusMinPixels=4))
         else:
             out.append(geojson_layer(id=name, data=feature, stroked=True, getLineColor=[120, 120, 120, 220], lineWidthMinPixels=1))
