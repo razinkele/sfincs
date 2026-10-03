@@ -35,7 +35,7 @@ class EventInfo:
     title: str
     tref: str
     tstop: str
-    data_window_end: str
+    data_window_end: str  # the observation window, not a run bound
     score_window_end: str
     zsini: float | None
 
@@ -135,7 +135,7 @@ class CuronianTemplate(Template):
             SettingField("viscosity", "Viscosity", "bool", True, group=OVERRIDES, explanation="Viscosity term on or off."),
             SettingField("advection", "Advection", "bool", True, group=OVERRIDES, explanation="Momentum advection on or off."),
             SettingField("tstop", "Stop time", "datetime", None, group=OVERRIDES, optional=True,
-                         explanation="YYYY-MM-DD HH:MM within the event's data window. Empty: the event's end. Before the scoring window the run is not validated."),
+                         explanation="YYYY-MM-DD HH:MM within the event's period (tref to its end). Empty: the event's end. Before the scoring window the run is not validated."),
         ]
 
     # -- settings ------------------------------------------------------------
@@ -145,8 +145,8 @@ class CuronianTemplate(Template):
         ev = CURONIAN_EVENTS[s["event"]]
         if s["pressure"] and s["wind"] != "grid":
             raise TemplateError("pressure: requires gridded wind")
-        if s["tstop"] is not None and not (ev.tref < s["tstop"] <= ev.data_window_end):
-            raise TemplateError(f"tstop: must lie after {ev.tref} and no later than {ev.data_window_end} for {ev.title}")
+        if s["tstop"] is not None and not (ev.tref < s["tstop"] <= ev.tstop):
+            raise TemplateError(f"tstop: must lie after {ev.tref} and no later than {ev.tstop} for {ev.title}")
         return s
 
     def _event(self, settings: dict) -> EventInfo:

@@ -88,8 +88,11 @@ def test_tstop_bounds_per_event(tpl):
         tpl.validate({**tpl.defaults(), "tstop": "2013-12-25 00:00"})  # after the data window
     with pytest.raises(TemplateError, match="tstop"):
         tpl.validate({**tpl.defaults(), "tstop": "2013-11-28 00:00"})  # not after tref
-    ok = tpl.validate({**tpl.defaults(), "event": "april_2013", "tstop": "2013-05-10 12:00"})
-    assert ok["tstop"] == "2013-05-10 12:00"
+    assert tpl.validate({**tpl.defaults(), "tstop": "2013-12-11 00:00"})["tstop"] == "2013-12-11 00:00"
+    with pytest.raises(TemplateError, match="tstop"):
+        tpl.validate({**tpl.defaults(), "tstop": "2013-12-15 00:00"})  # inside the data window, after the event end
+    ok = tpl.validate({**tpl.defaults(), "event": "april_2013", "tstop": "2013-04-30 12:00"})
+    assert ok["tstop"] == "2013-04-30 12:00"
     with pytest.raises(TemplateError, match="tstop"):
         tpl.validate({**tpl.defaults(), "event": "april_2013", "tstop": "2013-12-09 00:00"})
 
