@@ -30,7 +30,7 @@ ISOBATHS = HOME / "curonian/isobates.gpkg"
 ISOBATH_LAYER = "depth_isobates__isobates__depths"
 # The gauge database. Under the UI's service user HOME is /home/shiny, so the
 # deploy sets SFINCS_CURONIAN_DB; the command-line workflow keeps the default.
-DB = Path(os.environ.get("SFINCS_CURONIAN_DB", str(HOME / "curonian/curonian_db.gpkg")))
+DB = Path(os.environ.get("SFINCS_CURONIAN_DB") or str(HOME / "curonian/curonian_db.gpkg"))
 ERA5_2013 = HOME / "eutropy/era5_raw/era5_wind_nida_2013.nc"
 SFINCS_BIN = REPO / "sfincs-linux/bin/sfincs"
 RUN_SFINCS_SH = REPO / "run_sfincs.sh"

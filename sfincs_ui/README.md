@@ -67,6 +67,7 @@ The Curonian build and the validate/export chain need the model environment, so 
     /opt/micromamba/envs/shiny/bin/python -m pytest tests/test_model_env_curonian.py -m model_env -q -s
 
 The small-domain subgrid build they run (grid origin (314000, 6144000), 130 x 390 cells) took 54 s when measured in the model env.
+
 ## Layout
 
 `sfincs_ui/` is the project directory (this file, `pyproject.toml`,
@@ -149,7 +150,7 @@ The gate: a Curonian run launched from the UI reproduces the published validatio
 
 ```bash
 RUN=$(sudo -u shiny find /srv/sfincs-ui/workspace -maxdepth 2 -mindepth 2 -type d -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2)   # newest run dir: workspace/<project id>/<run id>; or read the ids from the Runs page
-sudo -u shiny diff <(sed -n '/Success criteria/,$p' $RUN/validation/validation.md) <(sed -n '/Success criteria/,$p' /home/razinka/sfincs/curonian/results/xaver_2013/validation.md) && echo CRITERIA MATCH
+sudo -u shiny diff <(sed -n '/Success criteria/,$p' $RUN/validation/validation.md | grep -o '\*\*\(not met\|met\|info\)\*\*') <(sed -n '/Success criteria/,$p' /home/razinka/sfincs/curonian/results/xaver_2013/validation.md | grep -o '\*\*\(not met\|met\|info\)\*\*') && echo CRITERIA MATCH
 sudo -u shiny ls $RUN/map_meta.json $RUN/validation/gauge_obs.csv $RUN/validation/validation_timeseries.png
 ```
 

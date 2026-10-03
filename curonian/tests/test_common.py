@@ -153,11 +153,14 @@ def test_db_path_from_environment(monkeypatch, tmp_path):
     import importlib
     import common as c
 
+    monkeypatch.delenv("SFINCS_CURONIAN_DB", raising=False)
     monkeypatch.setenv("SFINCS_CURONIAN_DB", str(tmp_path / "gauges.gpkg"))
     reloaded = importlib.reload(c)
     try:
         assert reloaded.DB == tmp_path / "gauges.gpkg"
         assert reloaded._db_uri().startswith("file:") and str(tmp_path / "gauges.gpkg") in reloaded._db_uri()
+        monkeypatch.setenv("SFINCS_CURONIAN_DB", "")
+        assert importlib.reload(c).DB == c.HOME / "curonian/curonian_db.gpkg"
     finally:
         monkeypatch.delenv("SFINCS_CURONIAN_DB")
         importlib.reload(c)

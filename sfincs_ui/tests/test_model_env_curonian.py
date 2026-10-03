@@ -37,6 +37,12 @@ def test_events_mirror_matches_common_events():
     out = subprocess.run([*MODEL_PYTHON, "-c", code], cwd=CURONIAN, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     real = json.loads(out.stdout)
+    from sfincs_ui.templates.curonian import CuronianTemplate
+    defaults = CuronianTemplate().defaults()
+    bm = subprocess.run([*MODEL_PYTHON, "-c", "import build_model as b, json; print(json.dumps([b.MANNING_LAND, b.MANNING_SEA, b.RGH_LEV_LAND]))"],
+                        cwd=CURONIAN, capture_output=True, text=True, timeout=120)
+    assert bm.returncode == 0, bm.stderr
+    assert [defaults["manning_land"], defaults["manning_sea"], defaults["rgh_lev_land"]] == json.loads(bm.stdout)
     assert set(real) == set(CURONIAN_EVENTS)
     for name, e in CURONIAN_EVENTS.items():
         r = real[name]
@@ -62,6 +68,9 @@ def test_small_domain_build_applies_manning_land(tmp_path):
     out = subprocess.run([*MODEL_PYTHON, "-c", code, str(run_dir)], cwd=CURONIAN, capture_output=True, text=True, timeout=1800)
     elapsed = time.monotonic() - t0
     assert out.returncode == 0, out.stderr[-3000:]
+    from sfincs_ui.templates.curonian import CuronianTemplate
+    missing = [f for f in CuronianTemplate().model_files() if not (run_dir / f).exists()]
+    assert not missing, f"template.model_files() entries absent after the build: {missing}"
     tifs = list((run_dir / "subgrid").glob("manning*.tif"))
     assert tifs, "setup_subgrid(write_man_tif=True) must write a manning raster"
     check = ("import sys, numpy as np, rasterio\n"

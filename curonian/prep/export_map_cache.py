@@ -1,6 +1,7 @@
 """Per-run cache for the viewer's Map tab.
 
     python -m prep.export_map_cache --run april_2013_gridwind
+    python -m prep.export_map_cache --event E --run-dir D --out-dir O   # as the UI calls it
 
 Writes runs/<run>/{zs_series.npy, map_baseline.npy, map_warp.npz,
 map_meta.json} (git-ignored; see app/map_core.export_cache) and
