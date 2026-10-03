@@ -5,6 +5,7 @@ Everything the spec fixes as a project-wide value lives here so that a change
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -27,7 +28,9 @@ DEM_5M = HOME / "telemac/data/LowerNEMUNASdem_5m.tif"
 EMODNET = HOME / "telemac/Curonian/data/curonian_bathymetry_hires.nc"
 ISOBATHS = HOME / "curonian/isobates.gpkg"
 ISOBATH_LAYER = "depth_isobates__isobates__depths"
-DB = HOME / "curonian/curonian_db.gpkg"
+# The gauge database. Under the UI's service user HOME is /home/shiny, so the
+# deploy sets SFINCS_CURONIAN_DB; the command-line workflow keeps the default.
+DB = Path(os.environ.get("SFINCS_CURONIAN_DB", str(HOME / "curonian/curonian_db.gpkg")))
 ERA5_2013 = HOME / "eutropy/era5_raw/era5_wind_nida_2013.nc"
 SFINCS_BIN = REPO / "sfincs-linux/bin/sfincs"
 RUN_SFINCS_SH = REPO / "run_sfincs.sh"

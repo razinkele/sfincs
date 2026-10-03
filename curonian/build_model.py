@@ -87,6 +87,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                     help="also add gridded ERA5 mean sea level pressure forcing (needs --wind grid's era5_grid.nc)")
     p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
     p.add_argument("--run-name", default=None, help="subdirectory of runs/; defaults to the event name")
+    p.add_argument("--run-dir", type=Path, default=None,
+                   help="write the model here instead of runs/<run-name> (the UI's workspace)")
+    p.add_argument("--manning-land", type=float, default=MANNING_LAND, help="subgrid/inp roughness on land")
+    p.add_argument("--manning-sea", type=float, default=MANNING_SEA, help="subgrid/inp roughness below rgh-lev-land")
+    p.add_argument("--rgh-lev-land", type=float, default=RGH_LEV_LAND, help="level separating land and sea roughness")
     args = p.parse_args(argv)
     if args.pressure and args.wind != "grid":
         raise SystemExit("--pressure requires --wind grid")
@@ -94,7 +99,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     return args
 
 
-def config_for(event: common.Event, zs_boundary: float) -> dict:
+def config_for(event: common.Event, zs_boundary: float, manning_land: float = MANNING_LAND,
+               manning_sea: float = MANNING_SEA) -> dict:
     """SFINCS config for this event. zsini is the event's if it sets one.
 
     Xaver leaves zsini=None and takes the sea boundary's first value, which was
@@ -106,27 +112,32 @@ def config_for(event: common.Event, zs_boundary: float) -> dict:
         tstop=event.tstop.strftime("%Y%m%d %H%M%S"),
         advection=1, alpha=0.5, huthresh=0.05, viscosity=1,
         dtout=3600, dthisout=600, dtmaxout=99999999,
-        manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
+        manning_land=manning_land, manning_sea=manning_sea,
         zsini=event.zsini if event.zsini is not None else zs_boundary,
     )
 
 
 def build(event: common.Event, run_dir: Path | None = None, subgrid: bool = True,
-          wind: str = "uniform", pressure: bool = False):
+          wind: str = "uniform", pressure: bool = False, manning_land: float = MANNING_LAND,
+          manning_sea: float = MANNING_SEA, rgh_lev_land: float = RGH_LEV_LAND,
+          grid: tuple[float, float, int, int] | None = None, check: bool = True):
+    """grid=(x0, y0, mmax, nmax) builds a sub-domain (the UI's small-domain test); check=False
+    skips the full-domain sanity asserts, which a sub-domain cannot meet."""
     from hydromt_sfincs import SfincsModel
 
     run_dir = run_dir or common.RUNS / event.name
     inputs, static = event.inputs_dir, common.INPUTS
     sf = SfincsModel(root=str(run_dir), mode="w+", data_libs=[str(common.ROOT / "data_catalog.yml")], write_gis=False)
-    sf.setup_grid(x0=common.X0, y0=common.Y0, dx=common.DX, dy=common.DY, nmax=common.NMAX, mmax=common.MMAX,
+    x0, y0, mmax, nmax = grid or (common.X0, common.Y0, common.MMAX, common.NMAX)
+    sf.setup_grid(x0=x0, y0=y0, dx=common.DX, dy=common.DY, nmax=nmax, mmax=mmax,
                   rotation=0, epsg=common.CRS)
     sf.setup_dep(datasets_dep=DATASETS_DEP)
     sf.setup_mask_active(mask="active_region", zmax=10.0, drop_area=0.5, fill_area=10.0, reset_mask=True)
     sf.setup_mask_bounds(btype="waterlevel", include_mask="boundary_ring", reset_bounds=True)
     if subgrid:
         sf.setup_subgrid(datasets_dep=DATASETS_DEP, datasets_riv=datasets_riv(inputs=static), nr_subgrid_pixels=20, nlevels=10,
-                         manning_land=MANNING_LAND, manning_sea=MANNING_SEA, rgh_lev_land=RGH_LEV_LAND,
-                         write_dep_tif=True)
+                         manning_land=manning_land, manning_sea=manning_sea, rgh_lev_land=rgh_lev_land,
+                         write_dep_tif=True, write_man_tif=True)
         # NOTE: hydromt_sfincs 1.2.2's setup_subgrid() always writes the modern NetCDF
         # subgrid table (sbgfile = sfincs_subgrid.nc), not the legacy binary sfincs.sbg
         # the brief names. Forcing the .sbg extension crashes: the new subgrid table
@@ -135,13 +146,14 @@ def build(event: common.Event, run_dir: Path | None = None, subgrid: bool = True
         # z_depth/u_hrep/u_navg field names -> AttributeError. Accept the NetCDF
         # default; see tests/test_build_model.py for the corresponding check.
     else:
-        sf.setup_manning_roughness(manning_land=MANNING_LAND, manning_sea=MANNING_SEA,
-                                   rgh_lev_land=RGH_LEV_LAND)
+        sf.setup_manning_roughness(manning_land=manning_land, manning_sea=manning_sea,
+                                   rgh_lev_land=rgh_lev_land)
 
     bzs = _read_ts(inputs / "bzs.csv")
     # config_for's zsini is the event's if it sets one, else the sea boundary's first
     # value (see config_for's docstring for why that split exists).
-    sf.setup_config(**config_for(event, zs_boundary=float(bzs.iloc[0].mean())))
+    sf.setup_config(**config_for(event, zs_boundary=float(bzs.iloc[0].mean()),
+                                 manning_land=manning_land, manning_sea=manning_sea))
     sf.setup_waterlevel_forcing(timeseries=bzs,
                                 locations=gpd.read_file(static / "boundary_points.geojson").set_index("index", drop=False))
     sf.setup_discharge_forcing(timeseries=_read_ts(inputs / "dis.csv"),
@@ -160,6 +172,8 @@ def build(event: common.Event, run_dir: Path | None = None, subgrid: bool = True
         sf.setup_pressure_forcing_from_grid(press=str(inputs / "era5_grid.nc"))
     sf.setup_observation_points(locations=gpd.read_file(static / "stations.geojson"))
     sf.write()
+    if not check:
+        return sf
     r = check_model(run_dir)
     print(r)
     assert 200_000 <= r["n_active"] <= 400_000, f"n_active out of [200000, 400000]: {r['n_active']}"
@@ -192,5 +206,6 @@ def check_model(run_dir: Path = common.RUN_XAVER) -> dict:
 
 if __name__ == "__main__":
     args = parse_args()
-    build(common.event(args.event), run_dir=common.RUNS / args.run_name, subgrid=not args.no_subgrid,
-          wind=args.wind, pressure=args.pressure)
+    build(common.event(args.event), run_dir=args.run_dir or common.RUNS / args.run_name, subgrid=not args.no_subgrid,
+          wind=args.wind, pressure=args.pressure, manning_land=args.manning_land, manning_sea=args.manning_sea,
+          rgh_lev_land=args.rgh_lev_land)

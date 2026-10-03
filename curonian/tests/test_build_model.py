@@ -204,3 +204,32 @@ def test_inp_manning_land_matches_the_subgrid_tables():
     inp = {k.strip(): v.strip() for k, v in inp.items()}
     assert float(inp["manning_land"]) == 0.06, "inp disagrees with setup_subgrid's manning_land"
     assert float(inp["manning_sea"]) == 0.02
+
+
+def test_parse_args_run_dir_wins_over_run_name(tmp_path):
+    args = bm.parse_args(["--run-dir", str(tmp_path / "x"), "--run-name", "ignored"])
+    assert args.run_dir == tmp_path / "x"
+
+
+def test_parse_args_run_dir_defaults_to_none_and_manning_to_constants():
+    args = bm.parse_args([])
+    assert args.run_dir is None
+    assert (args.manning_land, args.manning_sea, args.rgh_lev_land) == (bm.MANNING_LAND, bm.MANNING_SEA, bm.RGH_LEV_LAND)
+
+
+def test_parse_args_manning_flags():
+    args = bm.parse_args(["--manning-land", "0.08", "--manning-sea", "0.03", "--rgh-lev-land", "0.5"])
+    assert (args.manning_land, args.manning_sea, args.rgh_lev_land) == (0.08, 0.03, 0.5)
+
+
+def test_config_for_carries_the_manning_values():
+    cfg = bm.config_for(common.EVENTS["xaver_2013"], zs_boundary=0.4, manning_land=0.08, manning_sea=0.03)
+    assert cfg["manning_land"] == 0.08 and cfg["manning_sea"] == 0.03
+    assert bm.config_for(common.EVENTS["xaver_2013"], zs_boundary=0.4)["manning_land"] == bm.MANNING_LAND
+
+
+def test_build_signature_has_the_new_knobs_with_todays_defaults():
+    import inspect
+    p = inspect.signature(bm.build).parameters
+    assert p["manning_land"].default == bm.MANNING_LAND and p["manning_sea"].default == bm.MANNING_SEA
+    assert p["rgh_lev_land"].default == bm.RGH_LEV_LAND and p["grid"].default is None and p["check"].default is True

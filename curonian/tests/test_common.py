@@ -146,3 +146,19 @@ def test_nemunas_delta_factor_is_the_documented_split():
     """1.12 tributary uplift x (1 - 0.20 Gilija share): the sibling project's
     documented transformation (see the constant's comment)."""
     assert common.NEMUNAS_DELTA_FACTOR == pytest.approx(0.896)
+
+
+def test_db_path_from_environment(monkeypatch, tmp_path):
+    """The service user has no ~/curonian; SFINCS_CURONIAN_DB names the gauge database."""
+    import importlib
+    import common as c
+
+    monkeypatch.setenv("SFINCS_CURONIAN_DB", str(tmp_path / "gauges.gpkg"))
+    reloaded = importlib.reload(c)
+    try:
+        assert reloaded.DB == tmp_path / "gauges.gpkg"
+        assert reloaded._db_uri().startswith("file:") and str(tmp_path / "gauges.gpkg") in reloaded._db_uri()
+    finally:
+        monkeypatch.delenv("SFINCS_CURONIAN_DB")
+        importlib.reload(c)
+    assert c.DB == c.HOME / "curonian/curonian_db.gpkg"
