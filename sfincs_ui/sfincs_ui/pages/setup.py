@@ -133,6 +133,8 @@ def setup_server(input, output, session, project_service, run_service, settings_
 
     @render.ui
     def map_message():
+        if _project() is None:
+            return None  # the message describes a template, so it needs an open project
         msg = map_message_for(_geometry())
         return ui.p(msg, class_="text-muted small") if msg else None
 
