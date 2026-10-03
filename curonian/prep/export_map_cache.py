@@ -49,20 +49,37 @@ def write_gauge_obs(event: common.Event, results_dir: Path) -> Path:
     return out
 
 
-def main(run: str, runs_dir: Path = common.RUNS, results_root: Path = common.ROOT / "results") -> dict:
-    event = event_for_run(run)
-    meta = mc.export_cache(runs_dir / run)
-    write_gauge_obs(event, results_root / run)
-    print(f"{run} ({event.name}): {meta['n_active']} cells x {len(meta['hours'])} hours, "
+def main(run: str | None = None, runs_dir: Path = common.RUNS, results_root: Path = common.ROOT / "results", *,
+         event: str | None = None, run_dir: Path | None = None, out_dir: Path | None = None) -> dict:
+    """Export one run's map cache and gauge readings.
+
+    Command line: --run <name> under runs/, event derived from the name, gauge CSV to results/<name>.
+    UI: --run-dir <dir> --event <name> --out-dir <dir>/validation, nothing derived from directory names.
+    """
+    if run_dir is None:
+        if run is None:
+            raise SystemExit("one of run or run_dir is required")
+        run_dir = runs_dir / run
+    ev = common.event(event) if event else event_for_run(run_dir.name)
+    meta = mc.export_cache(run_dir)
+    write_gauge_obs(ev, out_dir or results_root / run_dir.name)
+    print(f"{run_dir.name} ({ev.name}): {meta['n_active']} cells x {len(meta['hours'])} hours, "
           f"ranges {meta['ranges']}")
     return meta
 
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--run", required=True, help="runs/<name> to export")
-    return p.parse_args(argv)
+    p.add_argument("--run", default=None, help="runs/<name> to export")
+    p.add_argument("--event", default=None, choices=sorted(common.EVENTS), help="the run's event (default: from the run name)")
+    p.add_argument("--run-dir", type=Path, default=None, help="export this directory instead of runs/<run>")
+    p.add_argument("--out-dir", type=Path, default=None, help="write gauge_obs.csv here (default results/<name>)")
+    args = p.parse_args(argv)
+    if args.run is None and args.run_dir is None:
+        p.error("one of --run or --run-dir is required")
+    return args
 
 
 if __name__ == "__main__":
-    main(parse_args().run)
+    a = parse_args()
+    main(a.run, event=a.event, run_dir=a.run_dir, out_dir=a.out_dir)
