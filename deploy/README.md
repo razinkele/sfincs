@@ -166,3 +166,5 @@ sudo --preserve-env=SFINCS_UI_ADMIN_PASSWORD bash deploy/deploy_ui.sh
 ```
 
 Re-running is idempotent; `create-admin` does nothing when an admin exists.
+
+Curonian template prerequisites: `curonian/inputs/` and `curonian/data_catalog.yml` must be present in the prod clone (both are tracked). The three absolute paths in the catalogue (the lower Nemunas DEM, the high-resolution lagoon bathymetry and the gauge database) and `SFINCS_CURONIAN_DB` must be readable by user `shiny`; the deep preflight proves the gauge database through `common.read_table`. `SFINCS_UI_MAX_THREADS=16` leaves room for the template's 8-thread default.

@@ -67,3 +67,20 @@ async def test_logged_in_user_sees_login_free_shell(app):
         assert r.status_code == 302
         assert (await c.get("/api/whoami")).json()["username"] == "alice"
         assert (await c.get("/")).status_code == 200
+
+
+async def test_real_registry_seeds_the_curonian_examples(db, tmp_path):
+    from sfincs_ui import config
+    from sfincs_ui.app import create_app
+    from sfincs_ui.templates import TEMPLATES
+
+    cfg = config.Config(workspace=tmp_path, database_url=f"sqlite:///{tmp_path / 'test.db'}", curonian_dir=tmp_path / "curonian")
+    config.set_config(cfg)
+    app = create_app(cfg, environment=EnvironmentReport(), templates=TEMPLATES, start_runner=False)
+    names = sorted(p["name"] for p in app.services["projects"].examples())
+    assert names == ["April 2013 (uniform wind)", "Plane beach example", "Xaver 2013 (uniform wind)"]
+    april = next(p for p in app.services["projects"].examples() if p["name"].startswith("April"))
+    assert april["settings"]["event"] == "april_2013" and april["settings"]["tstop"] is None
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://test") as c:
+        r = await c.get("/")
+        assert r.status_code == 200 and "deck" in r.text.lower()  # head_includes() on every page
