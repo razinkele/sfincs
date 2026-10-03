@@ -1,8 +1,9 @@
 from sfincs_ui.exceptions import TemplateError
 from sfincs_ui.templates.base import SettingField, Template
+from sfincs_ui.templates.curonian import CuronianTemplate
 from sfincs_ui.templates.plane_beach import PlaneBeachTemplate
 
-TEMPLATES: dict[str, Template] = {t.key: t for t in (PlaneBeachTemplate(),)}
+TEMPLATES: dict[str, Template] = {t.key: t for t in (PlaneBeachTemplate(), CuronianTemplate())}
 
 
 def get_template(key: str) -> Template:
@@ -12,4 +13,4 @@ def get_template(key: str) -> Template:
         raise TemplateError(f"unknown template {key!r}") from None
 
 
-__all__ = ["TEMPLATES", "get_template", "SettingField", "Template", "PlaneBeachTemplate"]
+__all__ = ["TEMPLATES", "get_template", "SettingField", "Template", "PlaneBeachTemplate", "CuronianTemplate"]
