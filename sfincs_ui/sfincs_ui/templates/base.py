@@ -7,13 +7,15 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from sfincs_ui.config import Config
 from sfincs_ui.exceptions import TemplateError
 
-Kind = Literal["int", "float", "choice", "bool"]
+Kind = Literal["int", "float", "choice", "bool", "datetime"]
+_DATETIME_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S")
 
 
 @dataclass(frozen=True)
@@ -30,8 +32,21 @@ class SettingField:
     choices: tuple | None = None
     explanation: str = ""
     group: str = "Model"
+    optional: bool = False  # None / empty input means "use the model's value"; the key is then omitted from overrides
 
     def coerce(self, raw: Any) -> Any:
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            if self.optional:
+                return None
+            raise TemplateError(f"{self.key}: a value is required")
+        if self.kind == "datetime":
+            text = str(raw).strip()
+            for fmt in _DATETIME_FORMATS:
+                try:
+                    return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M")
+                except ValueError:
+                    continue
+            raise TemplateError(f"{self.key}: expected a date and time like 2013-12-09 06:00")
         try:
             if self.kind == "bool":
                 if isinstance(raw, bool):
@@ -80,6 +95,10 @@ class Template(ABC):
 
     def defaults(self) -> dict:
         return {f.key: f.default for f in self.fields()}
+
+    def skip_reasons(self, settings: dict) -> dict[str, str]:
+        """stage -> why it is skipped for these settings (recorded in the run summary)."""
+        return {}
 
     def validate(self, settings: dict) -> dict:
         out = {}

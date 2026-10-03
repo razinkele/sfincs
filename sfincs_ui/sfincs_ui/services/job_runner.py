@@ -66,7 +66,8 @@ def validate_evidence(run_dir: Path) -> bool:
 
 
 def export_evidence(run_dir: Path) -> bool:
-    return (run_dir / "validation" / "map_meta.json").is_file()
+    # map_core.export_cache writes the cache next to sfincs_map.nc and map_meta.json last.
+    return (run_dir / "map_meta.json").is_file()
 
 
 def evidence_for(stage: str, run_dir: Path, template: Template) -> Callable[[], bool]:
@@ -440,6 +441,13 @@ class JobRunner:
             codes = [j.exit_code for j in run.jobs if j.status != "cancelled"]  # a requeued stage leaves a cancelled row
             run.status = "finished"; run.finished_at = utcnow()
             run.exit_code = None if any(c is None for c in codes) else 0
+            try:
+                _r, _p, template, settings, _d = self._load(run_id)
+                skipped = template.skip_reasons(settings)
+            except Exception:
+                logger.exception("skip reasons for run %s unavailable", run_id)
+                skipped = {}
+            run.summary_json = json.dumps({"skipped": skipped}) if skipped else None
             s.commit()
         finally:
             s.close()

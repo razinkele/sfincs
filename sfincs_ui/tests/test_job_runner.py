@@ -237,3 +237,34 @@ async def test_finish_run_ignores_cancelled_rows(runner, db, tmp_path):
     runner._finish_run(run_id)
     row = run_row(db, run_id)
     assert row["status"] == "finished" and row["exit_code"] == 0
+
+
+async def test_skip_reason_recorded_in_summary(runner, db, tmp_path, monkeypatch):
+    """Review Focus 1: a template that skips a stage says why, and the finished run carries it."""
+    from tests.fake_template import FakeTemplate
+
+    class SkippingTemplate(FakeTemplate):
+        def validate_command(self, run_dir, settings, config):
+            return None
+
+        def skip_reasons(self, settings):
+            return {"validate": "run ends before the scoring window"}
+
+    runner._templates["skipper"] = SkippingTemplate(with_validation=True)
+    run_id = make_run(db, tmp_path, "skipper", S)
+    await runner.start()
+    runner.submit(run_id)
+    await runner.wait(run_id, timeout=20)
+    row = run_row(db, run_id)
+    assert row["status"] == "finished" and [j["stage"] for j in row["jobs"]] == ["build", "simulate"]
+    assert row["summary"] == {"skipped": {"validate": "run ends before the scoring window"}}
+
+
+def test_export_evidence_looks_in_the_run_directory(tmp_path):
+    from sfincs_ui.services.job_runner import export_evidence
+
+    assert not export_evidence(tmp_path)
+    (tmp_path / "map_meta.json").write_text("{}")
+    assert export_evidence(tmp_path)
+    (tmp_path / "map_meta.json").unlink(); (tmp_path / "validation").mkdir(); (tmp_path / "validation" / "map_meta.json").write_text("{}")
+    assert not export_evidence(tmp_path)  # the cache lives next to sfincs_map.nc, not under validation/

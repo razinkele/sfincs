@@ -31,6 +31,8 @@ sfincs_ui = ["migrations/*.py", "migrations/*.mako", "migrations/versions/*.py",
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "-m 'not model_env'"
+markers = ["model_env: needs the hydromt-sfincs micromamba env; deselected by default"]
 testpaths = ["tests"]
 pythonpath = ["."]
 filterwarnings = ["error:datetime.datetime.utcnow:DeprecationWarning"]

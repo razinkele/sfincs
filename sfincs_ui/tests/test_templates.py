@@ -79,3 +79,29 @@ def test_coerce_edge_cases(tpl):
         tpl.validate({**tpl.defaults(), "alpha": float("nan")})
     with pytest.raises(TemplateError, match="duration_hours"):
         tpl.validate({**tpl.defaults(), "duration_hours": float("inf")})
+
+
+def test_optional_field_round_trip():
+    """Review Focus 3: an empty box means 'use the model's value' and survives coercion as None."""
+    f = SettingField("dtmax", "dtmax", "float", None, minimum=1, maximum=600, optional=True)
+    assert f.coerce(None) is None and f.coerce("") is None and f.coerce("  ") is None
+    assert f.coerce("30") == 30.0
+    with pytest.raises(TemplateError, match="dtmax"):
+        f.coerce("0.5")
+    required = SettingField("alpha", "alpha", "float", 0.5, minimum=0.1, maximum=0.9)
+    with pytest.raises(TemplateError, match="required"):
+        required.coerce(None)
+
+
+def test_datetime_field_canonical_form():
+    f = SettingField("tstop", "tstop", "datetime", None, optional=True)
+    assert f.coerce("2013-12-09 06:00") == "2013-12-09 06:00"
+    assert f.coerce("2013-12-09T06:00") == "2013-12-09 06:00"
+    assert f.coerce("2013-12-09 06:00:00") == "2013-12-09 06:00"
+    assert f.coerce(None) is None
+    with pytest.raises(TemplateError, match="tstop"):
+        f.coerce("9 Dec 2013")
+
+
+def test_skip_reasons_default_empty(tpl):
+    assert tpl.skip_reasons(tpl.defaults()) == {}
