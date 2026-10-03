@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import re
-import sqlite3
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -33,7 +32,7 @@ EXPECTED_CATALOGUE_PATHS = 3
 
 _IMPORT_SNIPPET = "import hydromt_sfincs, rasterio"
 _GEOTIFF_SNIPPET = "import rasterio; rasterio.open({path!r}).close()"
-DEFAULT_GAUGE_DB = "/home/razinka/curonian/curonian_db.gpkg"
+_GAUGE_SNIPPET = "import common; common.read_table('SELECT 1')"
 
 
 @dataclass
@@ -118,14 +117,11 @@ def _check_deep(config: Config, runner, problems: list[str]) -> None:
                     problems.append(f"Catalogue path not readable: {p}")
     if tif.is_file():
         _run_model_python(config, _GEOTIFF_SNIPPET.format(path=str(tif)), runner, "open a GeoTIFF with rasterio", problems)
-    # The gauge database is read by validate.py and export_map_cache (milestone
-    # 3 routes them through SFINCS_CURONIAN_DB). Open it read-only here so a
-    # path the service user cannot read is caught at deploy time.
-    gauge_db = os.environ.get("SFINCS_CURONIAN_DB", DEFAULT_GAUGE_DB)
-    try:
-        sqlite3.connect(f"file:{gauge_db}?mode=ro", uri=True).close()
-    except sqlite3.Error as exc:
-        problems.append(f"Gauge database cannot be opened read-only: {gauge_db} ({exc})")
+    # The gauge database is read by validate.py and export_map_cache through
+    # common.read_table, which honours SFINCS_CURONIAN_DB (milestone 3). Run the
+    # same read in the model env, from the pipeline directory, so the deploy
+    # preflight (run as the service user) fails the way a run would.
+    _run_model_python(config, _GAUGE_SNIPPET, runner, "read the gauge database through common.read_table", problems)
 
 
 def check_environment(config: Config, *, deep: bool = False, runner=subprocess.run) -> EnvironmentReport:

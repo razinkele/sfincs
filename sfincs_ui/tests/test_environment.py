@@ -112,14 +112,12 @@ def test_deep_checks_inputs_and_catalogue(layout, tmp_path, monkeypatch):
     (cur / "inputs" / "april_2013").mkdir()
     (cur / "inputs" / "lagoon_bathy_50m.tif").write_bytes(b"")
     (cur / "data_catalog.yml").write_text("a:\n  path: /nonexistent/one.tif\nb:\n  path: relative/ok.nc\n")
-    monkeypatch.setenv("SFINCS_CURONIAN_DB", str(tmp_path / "missing.gpkg"))
     runner = _fake_runner({str(layout.sfincs_bin): (2, BANNER), "fake-python": (0, b"")})
     report = check_environment(layout, deep=True, runner=runner)
     joined = "\n".join(report.problems)
     assert "april_2013/era5_grid.nc" in joined and "april_2013/gtsm" in joined
     assert "/nonexistent/one.tif" in joined
     assert "relative/ok.nc" not in joined
-    assert "missing.gpkg" in joined and "gauge database" in joined.lower()
     # deep mode asked the model env to open the GeoTIFF
     snippets = [c[0][-1] for c in runner.calls if c[0][0] == "fake-python"]
     assert any("rasterio.open" in s for s in snippets)
@@ -130,16 +128,31 @@ def test_deep_checks_inputs_and_catalogue(layout, tmp_path, monkeypatch):
     assert import_call[1]["timeout"] == 120
 
 
-def test_deep_gauge_database_opens_read_only(layout, tmp_path, monkeypatch):
-    import sqlite3
-
-    db = tmp_path / "gauges.gpkg"
-    sqlite3.connect(db).close()
-    monkeypatch.setenv("SFINCS_CURONIAN_DB", str(db))
+def test_deep_gauge_check_uses_common_read_table(layout, tmp_path, monkeypatch):
+    """Review Focus 4: the deploy preflight proves the gauge database the way validate.py reads it, as the service user."""
     (layout.curonian_dir / "inputs").mkdir()
     runner = _fake_runner({str(layout.sfincs_bin): (2, BANNER), "fake-python": (0, b"")})
     report = check_environment(layout, deep=True, runner=runner)
-    assert not any("gauge database" in p.lower() for p in report.problems)
+    gauge_calls = [c for c in runner.calls if "common.read_table" in " ".join(map(str, c[0]))]
+    assert len(gauge_calls) == 1
+    argv, kwargs = gauge_calls[0]
+    assert argv[-2] == "-c" and "import common" in argv[-1] and "SELECT 1" in argv[-1]
+    assert kwargs["cwd"] == str(layout.curonian_dir)
+    assert not any("gauge" in p.lower() for p in report.problems)
+
+
+def test_deep_gauge_failure_is_reported_with_the_model_env_label(layout, monkeypatch):
+    (layout.curonian_dir / "inputs").mkdir()
+
+    inner = _fake_runner({str(layout.sfincs_bin): (2, BANNER), "fake-python": (0, b"")})
+
+    def runner(argv, **kw):
+        if "common.read_table" in " ".join(map(str, argv)):
+            return subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"sqlite3.OperationalError: unable to open database file")
+        return inner(argv, **kw)
+
+    report = check_environment(layout, deep=True, runner=runner)
+    assert any("read the gauge database through common.read_table" in p and "unable to open database file" in p for p in report.problems)
 
 
 def test_deep_unreadable_catalogue_is_a_problem_not_an_exception(layout, monkeypatch):
