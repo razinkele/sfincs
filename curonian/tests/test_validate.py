@@ -513,3 +513,28 @@ def test_rusne_file_loads_relative_to_its_own_gauge_zero():
     s = mf.load_rusne_levels(APRIL)
     assert len(s) == 48 and s.index[0] == pd.Timestamp("2013-03-26")
     assert s.loc["2013-04-21"] == pytest.approx(3.44), "cm/100 only -- no model-datum shift"
+
+
+def test_parse_args_run_dir_and_out_dir(tmp_path):
+    args = va.parse_args(["--event", "april_2013", "--run-dir", str(tmp_path / "r"), "--out-dir", str(tmp_path / "r" / "validation")])
+    assert args.run_dir == tmp_path / "r" and args.out_dir == tmp_path / "r" / "validation"
+    assert va.parse_args([]).run_dir is None and va.parse_args([]).out_dir is None
+
+
+def test_main_writes_into_out_dir_without_touching_results(tmp_path, monkeypatch):
+    """With --out-dir the report and figures land there and results/ is never written."""
+    run_dir = tmp_path / "run"; run_dir.mkdir()
+    out_dir = run_dir / "validation"
+    idx = pd.date_range("2013-12-06", periods=4, freq="6h")
+    his = pd.DataFrame({g: [0.1, 0.2, 0.3, 0.4] for g in va.GAUGES}, index=idx)
+    monkeypatch.setattr(va, "load_his", lambda rd: his)
+    monkeypatch.setattr(va, "load_gauge_levels", lambda g, e: pd.Series([0.1, 0.4], index=[idx[0], idx[-1]]))
+    monkeypatch.setattr(va, "load_rusne_levels", lambda e: pd.Series([1.0, 1.1], index=[idx[0], idx[-1]]))
+    monkeypatch.setattr(va, "flood_map", lambda rd, out_png, event: (out_png.write_bytes(b"png") or 12.5))
+    monkeypatch.setattr(va, "criteria", lambda his, obs, rd, event: [])
+    copied = []
+    monkeypatch.setattr(va.shutil, "copy2", lambda a, b: copied.append(b))
+    va.main(common.EVENTS["xaver_2013"], run_dir=run_dir, out_dir=out_dir)
+    assert (out_dir / "validation.md").is_file() and (out_dir / "validation_timeseries.png").is_file()
+    assert (out_dir / "flood_extent_delta.png").read_bytes() == b"png"
+    assert copied == [] and not (run_dir / "validation.md").exists()

@@ -442,8 +442,13 @@ def _skill_table_lines(his: pd.DataFrame, obs_by_site: dict, window: tuple | Non
     return lines
 
 
-def main(event: common.Event, run_dir: Path | None = None) -> None:
+def main(event: common.Event, run_dir: Path | None = None, out_dir: Path | None = None) -> None:
+    """out_dir: where validation.md and the figures go. None (the command-line default) writes
+    them into run_dir and copies them to results/<run name>; the UI passes <run>/validation and
+    nothing is copied."""
     run_dir = run_dir or common.RUNS / event.name
+    target = out_dir or run_dir
+    target.mkdir(parents=True, exist_ok=True)
     his = load_his(run_dir)
     obs_by_site = {g: load_gauge_levels(g, event) for g in GAUGES}
     # Not in GAUGES: its gauge zero is unknown, so it has no place in the absolute
@@ -461,9 +466,9 @@ def main(event: common.Event, run_dir: Path | None = None) -> None:
         obs = obs_by_site[g]
         ax.plot(his.index, his[g], label="SFINCS"); ax.plot(obs.index, obs.values, "o", ms=4, label="gauge (06/18 h)")
         ax.set_ylabel(f"{g} [m]"); ax.grid(alpha=0.3); ax.legend(loc="upper left")
-    fig.autofmt_xdate(); fig.tight_layout(); fig.savefig(run_dir / "validation_timeseries.png", dpi=130); plt.close(fig)
+    fig.autofmt_xdate(); fig.tight_layout(); fig.savefig(target / "validation_timeseries.png", dpi=130); plt.close(fig)
 
-    area = flood_map(run_dir, run_dir / "flood_extent_delta.png", event=event)
+    area = flood_map(run_dir, target / "flood_extent_delta.png", event=event)
     lines += ["", f"Flooded land in the delta window (depth > 5 cm, ground > 0 m): **{area:.1f} km²**"]
 
     crit = criteria(his, obs_by_site, run_dir, event=event)
@@ -471,19 +476,22 @@ def main(event: common.Event, run_dir: Path | None = None) -> None:
     for c in crit:
         lines.append(f"- {c['name']} [{c['window']}]: **{c['verdict']}** -- {c['value']} (threshold: {c['threshold']})")
 
-    (run_dir / "validation.md").write_text("\n".join(lines) + "\n")
+    (target / "validation.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 
-    results_dir = common.ROOT / "results" / run_dir.name
-    results_dir.mkdir(parents=True, exist_ok=True)
-    for fname in ("validation.md", "validation_timeseries.png", "flood_extent_delta.png"):
-        shutil.copy2(run_dir / fname, results_dir / fname)
+    if out_dir is None:
+        results_dir = common.ROOT / "results" / run_dir.name
+        results_dir.mkdir(parents=True, exist_ok=True)
+        for fname in ("validation.md", "validation_timeseries.png", "flood_extent_delta.png"):
+            shutil.copy2(run_dir / fname, results_dir / fname)
 
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--event", default="xaver_2013", choices=sorted(common.EVENTS))
     p.add_argument("--run", default=None, help="runs/<name> to validate; results go to results/<name>; defaults to the event name")
+    p.add_argument("--run-dir", type=Path, default=None, help="validate this directory instead of runs/<run>")
+    p.add_argument("--out-dir", type=Path, default=None, help="write the report and figures here (no copy to results/)")
     args = p.parse_args(argv)
     args.run = args.run or args.event
     return args
@@ -491,4 +499,4 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    main(common.event(args.event), run_dir=common.RUNS / args.run)
+    main(common.event(args.event), run_dir=args.run_dir or common.RUNS / args.run, out_dir=args.out_dir)
